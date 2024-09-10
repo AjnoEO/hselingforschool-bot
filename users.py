@@ -1,6 +1,6 @@
 import sqlite3
 from db import DATABASE
-from utils import provide_cursor, value_exists
+from utils import provide_cursor, value_exists, update_in_table
 
 class UserError(Exception):
     """Ошибки, вызванные неправильными действиями пользователей"""
@@ -109,11 +109,7 @@ class User:
         return cls.from_db(tg_handle=tg_handle)
     
     def __set(self, column: str, value):
-        with sqlite3.connect(DATABASE) as conn:
-            cur = conn.cursor()
-            q = f"UPDATE users SET {column} = ? WHERE user_id = ?"
-            cur.execute(q, (value, self.__user_id))
-            conn.commit()
+        update_in_table("users", column, value, "user_id", self.__user_id)
 
     @property
     def user_id(self): return self.__user_id
@@ -327,11 +323,7 @@ class Participant(OlympMember):
         return super().from_id(id, "participants", error_message_user_not_found="Участник не найден")
 
     def __set(self, column: str, value):
-        with sqlite3.connect(DATABASE) as conn:
-            cur = conn.cursor()
-            q = f"UPDATE participants SET {column} = ? WHERE id = ?"
-            cur.execute(q, (value, self.id))
-            conn.commit()
+        update_in_table("participants", column, value, "id", self.__id)
     
     @property
     def id(self): return self.__id
@@ -457,11 +449,7 @@ class Examiner(OlympMember):
         return super().from_id(id, "examiners", error_message_user_not_found="Принимающий не найден")
 
     def __set(self, column: str, value):
-        with sqlite3.connect(DATABASE) as conn:
-            cur = conn.cursor()
-            q = f"UPDATE examiners SET {column} = ? WHERE id = ?"
-            cur.execute(q, (value, self.id))
-            conn.commit()
+        update_in_table("examiners", column, value, "id", self.__id)
 
     @property
     def id(self): return self.__id

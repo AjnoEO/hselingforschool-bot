@@ -3,7 +3,7 @@ from statuses import OlympStatus
 import sqlite3
 from db import DATABASE
 from users import Participant, Examiner, UserError
-from utils import value_exists, provide_cursor
+from utils import value_exists, provide_cursor, update_in_table
 
 
 class Olymp:
@@ -57,11 +57,7 @@ class Olymp:
 
 
     def __set(self, column: str, value):
-        with sqlite3.connect(DATABASE) as conn:
-            cur = conn.cursor()
-            q = f"UPDATE olymps SET {column} = ? WHERE id = ?"
-            cur.execute(q, (value, self.id))
-            conn.commit()
+        update_in_table("olymps", column, value, "id", self.__id)
 
     @property
     def id(self): return self.__id

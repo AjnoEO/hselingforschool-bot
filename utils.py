@@ -28,3 +28,10 @@ def value_exists(table: str, column_values: dict[str], *, cursor: sqlite3.Cursor
     cursor.execute(f"SELECT EXISTS(SELECT 1 FROM {table} WHERE {' AND '.join(conditions)})", tuple(values))
     result = cursor.fetchone()
     return bool(result[0])
+
+def update_in_table(table: str, column: str, value, id_column: str, id_value):
+    with sqlite3.connect(DATABASE) as conn:
+        cur = conn.cursor()
+        q = f"UPDATE {table} SET {column} = ? WHERE {id_column} = ?"
+        cur.execute(q, (value, id_value))
+        conn.commit()
