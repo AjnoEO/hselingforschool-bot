@@ -98,15 +98,15 @@ class User:
 
     @classmethod
     def from_user_id(cls, user_id: int):
-        return cls(user_id=user_id)
+        return cls.from_db(user_id=user_id)
 
     @classmethod
     def from_tg_id(cls, tg_id: int):
-        return cls(tg_id=tg_id)
+        return cls.from_db(tg_id=tg_id)
     
     @classmethod
     def from_tg_handle(cls, tg_handle: str):
-        return cls(tg_handle=tg_handle)
+        return cls.from_db(tg_handle=tg_handle)
     
     def __set(self, column: str, value):
         with sqlite3.connect(DATABASE) as conn:
@@ -163,7 +163,7 @@ class OlympMember(User):
         cls,
         olymp_id: int,
         table: str,
-        additional_values: list[str],
+        additional_keys: list[str],
         *,
         user_id: int | None = None,
         tg_id: int | None = None,
@@ -172,40 +172,47 @@ class OlympMember(User):
         error_message_user_not_found: str = "Пользователь не найден в базе",
         error_message_ids_dont_match: str = "Данные идентификаторы не соответствуют"
     ):
-        olymp_member = super().from_db(user_id=user_id, tg_id=tg_id, tg_handle=tg_handle,
-                                       error_message_no_id_provided=error_message_no_id_provided,
-                                       error_message_user_not_found=error_message_user_not_found,
-                                       error_message_ids_dont_match=error_message_ids_dont_match)
+        user = User.from_db(user_id=user_id, tg_id=tg_id, tg_handle=tg_handle,
+                            error_message_no_id_provided=error_message_no_id_provided,
+                            error_message_user_not_found=error_message_user_not_found,
+                            error_message_ids_dont_match=error_message_ids_dont_match)
         with sqlite3.connect(DATABASE) as conn:
             cur = conn.cursor()
-            if not value_exists(table, {"user_id": olymp_member.user_id, "olymp_id": olymp_id}, cursor = cur):
+            if not value_exists(table, {"user_id": user.user_id, "olymp_id": olymp_id}, cursor = cur):
                 raise UserError(error_message_user_not_found)
-            olymp_member.__olymp_id = olymp_id
             q = f"""
                 SELECT
-                    {", ".join(additional_values)}
+                    {", ".join(additional_keys)}
                 FROM
                     {table}
                 WHERE
                     user_id = ?
                     AND olymp_id = ?
                 """
-            cur.execute(q, (olymp_member.user_id, olymp_member.olymp_id))
-            olymp_member._additional_values = dict(zip(additional_values, cur.fetchone()))
-        return olymp_member
+            cur.execute(q, (user.user_id, olymp_id))
+            additional_values = dict(zip(additional_keys, cur.fetchone()))
+        return cls(
+            olymp_id,
+            user.user_id,
+            user.tg_id,
+            user.tg_handle,
+            user.name,
+            user.surname,
+            **additional_values,
+        )
 
     @classmethod
     def from_user_id(cls, user_id: int, olymp_id: int):
-        return cls(olymp_id, user_id=user_id)
+        return cls.from_db(olymp_id, user_id=user_id)
 
     @classmethod
     def from_tg_id(cls, tg_id: int, olymp_id: int):
-        return cls(olymp_id, tg_id=tg_id)
-    
+        return cls.from_db(olymp_id, tg_id=tg_id)
+
     @classmethod
     def from_tg_handle(cls, tg_handle: str, olymp_id: int):
-        return cls(olymp_id, tg_handle=tg_handle)
-    
+        return cls.from_db(olymp_id, tg_handle=tg_handle)
+
     @classmethod
     def from_id(
         cls, 
@@ -222,26 +229,26 @@ class OlympMember(User):
                 raise UserError(error_message_user_not_found)
             user_id, olymp_id = fetch
             return cls.from_user_id(user_id, olymp_id)
-            
-    
+
     @property
-    def olymp_id(self): return self.__olymp_id
+    def olymp_id(self):
+        return self.__olymp_id
 
 
 class Participant(OlympMember):
     def __init__(
         self,
         olymp_id: int,
-        participant_id: int,
         user_id: int,
         tg_id: int | None,
         tg_handle: int,
         name: str,
         surname: str,
-        grade: int
+        grade: int,
+        id: int
     ):
-        super().__init__(olymp_id, user_id, tg_id, tg_handle, name, surname, id=participant_id, grade=grade)
-        self.__id: int = participant_id
+        super().__init__(olymp_id, user_id, tg_id, tg_handle, name, surname, id=id, grade=grade)
+        self.__id: int = id
         self.__grade: int = grade
 
     
@@ -313,6 +320,7 @@ class Participant(OlympMember):
         )
         participant.__id = participant._additional_values["id"]
         participant.__grade = participant._additional_values["grade"]
+        return participant
 
     @classmethod
     def from_id(cls, id: int):
@@ -339,7 +347,6 @@ class Examiner(OlympMember):
     def __init__(
         self,
         olymp_id: int,
-        examiner_id: int,
         user_id: int,
         tg_id: int | None,
         tg_handle: int,
@@ -348,14 +355,15 @@ class Examiner(OlympMember):
         conference_link: str,
         problems: list[int] | str,
         busyness_level: int,
-        is_busy: bool | int
+        is_busy: bool | int,
+        id: int
     ):
         super().__init__(olymp_id, user_id, tg_id, tg_handle, name, surname,
-                         id=examiner_id, conference_link=conference_link, problems=problems,
+                         id=id, conference_link=conference_link, problems=problems,
                          busyness_level=busyness_level, is_busy=is_busy)
         if isinstance(problems, str):
             problems = list(map(int, problems.split(",")))
-        self.__id: int = examiner_id
+        self.__id: int = id
         self.__conference_link: str = conference_link
         self.__problems: list[int] = problems
         self.__busyness_level: int = busyness_level
@@ -417,8 +425,9 @@ class Examiner(OlympMember):
             busyness_level=busyness_level, is_busy=is_busy, cursor=cursor
         )
     
-    def __init__(
-        self,
+    @classmethod
+    def from_db(
+        cls,
         olymp_id: int,
         *,
         user_id: int | None = None,
@@ -436,11 +445,12 @@ class Examiner(OlympMember):
             error_message_user_not_found = ("Принимающий не найден. Если вы принимающий, "
                                             "авторизуйтесь при помощи команды /start.")
         )
-        self.__id: int = self._additional_values["id"]
-        self.__conference_link: str = self._additional_values["conference_link"]
-        self.__problems: list[int] = list(map(int, self._additional_values["problems"].split(",")))
-        self.__busyness_level: int = self._additional_values["busyness_level"]
-        self.__is_busy: bool = bool(self._additional_values["is_busy"])
+        examiner.__id = examiner._additional_values["id"]
+        examiner.__conference_link = examiner._additional_values["conference_link"]
+        examiner.__problems = list(map(int, examiner._additional_values["problems"].split(",")))
+        examiner.__busyness_level = examiner._additional_values["busyness_level"]
+        examiner.__is_busy = bool(examiner._additional_values["is_busy"])
+        return examiner
 
     @classmethod
     def from_id(cls, id: int):
@@ -479,4 +489,3 @@ class Examiner(OlympMember):
     def is_busy(self, value: int):
         self.__set('is_busy', value)
         self.__is_busy = value
-    
