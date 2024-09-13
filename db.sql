@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS `examiners` (
 	FOREIGN KEY(`user_id`) REFERENCES `users`(`user_id`)
 );
 CREATE TABLE IF NOT EXISTS `queue` (
-	`pos` integer primary key NOT NULL UNIQUE,
+	`id` integer primary key NOT NULL UNIQUE,
 	`olymp_id` INTEGER NOT NULL,
 	`participant_id` INTEGER NOT NULL,
 	`problem_id` INTEGER NOT NULL,

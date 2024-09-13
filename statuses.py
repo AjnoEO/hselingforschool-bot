@@ -22,3 +22,11 @@ class QueueStatus(SqliteCompatibleEnum):
     DISCUSSING = 2
     SUCCESS = 3
     FAIL = 4
+
+    @classmethod
+    def active(cls, *, as_numbers: bool = False):
+        active_statuses = [cls.WAITING, cls.DISCUSSING]
+        if as_numbers:
+            return [s.value for s in active_statuses]
+        else:
+            return active_statuses

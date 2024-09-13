@@ -1,6 +1,7 @@
 import sqlite3
 from db import DATABASE
 from utils import provide_cursor, value_exists, update_in_table
+from queue_entry import QueueEntry, QueueStatus
 
 class UserError(Exception):
     """Ошибки, вызванные неправильными действиями пользователей"""
@@ -151,7 +152,8 @@ class OlympMember(User):
         **additional_values
     ):
         super().__init__(user_id, tg_id, tg_handle, name, surname)
-        self.__olymp_id = olymp_id
+        self.__olymp_id: int = olymp_id
+        self.__id: int | None = None
         self._additional_values = additional_values
 
     @classmethod
@@ -225,6 +227,20 @@ class OlympMember(User):
                 raise UserError(error_message_user_not_found)
             user_id, olymp_id = fetch
             return cls.from_user_id(user_id, olymp_id)
+
+    @property
+    def queue_entry(self, id_column: str, *, error_if_none: str | None = None):
+        with sqlite3.connect(DATABASE) as conn:
+            cur = conn.cursor()
+            q = (f"SELECT * FROM queue WHERE {id_column} = ?"
+                 f"AND status IN ({", ".join(QueueStatus.active(as_numbers=True))})")
+            cur.execute(q, (self.__id,))
+            fetch = cur.fetchone()
+        if fetch is not None:
+            return QueueEntry(*fetch)
+        if fetch is None and not error_if_none:
+            return None
+        raise UserError(error_if_none)
 
     @property
     def olymp_id(self):
@@ -321,6 +337,10 @@ class Participant(OlympMember):
     @classmethod
     def from_id(cls, id: int):
         return super().from_id(id, "participants", error_message_user_not_found="Участник не найден")
+
+    @property
+    def queue_entry(self, *, error_if_none: str | None = None):
+        return super().queue_entry(self, "participant_id", error_if_none=error_if_none)
 
     def __set(self, column: str, value):
         update_in_table("participants", column, value, "id", self.__id)
@@ -448,6 +468,10 @@ class Examiner(OlympMember):
     def from_id(cls, id: int):
         return super().from_id(id, "examiners", error_message_user_not_found="Принимающий не найден")
 
+    @property
+    def queue_entry(self, *, error_if_none: str | None = None):
+        return super().queue_entry(self, "examiner_id", error_if_none=error_if_none)
+    
     def __set(self, column: str, value):
         update_in_table("examiners", column, value, "id", self.__id)
 
