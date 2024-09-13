@@ -2,6 +2,11 @@ import os
 from db import DATABASE, create_tables
 from users import User, Participant, Examiner
 from olymp import Olymp, OlympStatus
+from queue_entry import QueueEntry, QueueStatus
+from problem import Problem
+
+class TestError:
+    """Ошибка при тестировании"""
 
 print(f"При тестировании база данных {DATABASE} будет очищена. Ты сделал бэкап? (напиши Да чтобы продолжить)")
 answer = input()
@@ -25,4 +30,9 @@ p.grade = 2
 e.busyness_level += 1
 print(Participant.from_id(2).name)
 print(Examiner.from_id(2).surname)
-
+problem_1: Problem = Problem.create(olymp2007.id, 1, None, "minors")
+Problem.create(olymp2007.id, 2, 1, "majors")
+problem_2: Problem = Problem.from_junior_number(olymp2007.id, 2)
+print(problem_2.name)
+problem_1.junior_number = 3
+print(Problem.from_id(1).junior_number)

@@ -22,11 +22,11 @@ CREATE TABLE IF NOT EXISTS `users` (
 );
 CREATE TABLE IF NOT EXISTS `problems` (
 	`id` integer primary key NOT NULL UNIQUE,
-	`olymps_id` INTEGER NOT NULL,
+	`olymp_id` INTEGER NOT NULL,
 	`junior_no` INTEGER,
 	`senior_no` INTEGER,
 	`name` TEXT NOT NULL,
-	FOREIGN KEY(`olymps_id`) REFERENCES `olymps`(`id`)
+	FOREIGN KEY(`olymp_id`) REFERENCES `olymps`(`id`)
 );
 CREATE TABLE IF NOT EXISTS `participants` (
 	`id` integer primary key NOT NULL UNIQUE,

@@ -72,7 +72,7 @@ class Problem:
             if f[3] == name:
                 UserError(f"Название {name} уже занято задачей {pr_id}")
         values = (olymp_id, junior_no, senior_no, name)
-        cursor.execute("INSERT INTO olymps(olymp_id, junior_no, senior_no, name) VALUES (?, ?, ?, ?)", values)
+        cursor.execute("INSERT INTO problems(olymp_id, junior_no, senior_no, name) VALUES (?, ?, ?, ?)", values)
         cursor.connection.commit()
         created_id = cursor.lastrowid
         return cls(created_id, *values)

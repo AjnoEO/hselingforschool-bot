@@ -230,7 +230,7 @@ class OlympMember(User):
         with sqlite3.connect(DATABASE) as conn:
             cur = conn.cursor()
             q = (f"SELECT * FROM queue WHERE {id_column} = ?"
-                 f"AND status IN ({", ".join(QueueStatus.active(as_numbers=True))})")
+                 f"AND status IN ({', '.join(QueueStatus.active(as_numbers=True))})")
             cur.execute(q, (self.__id,))
             fetch = cur.fetchone()
         if fetch is not None:
