@@ -7,32 +7,40 @@ from utils import value_exists, provide_cursor, update_in_table
 
 
 class Olymp:
-    def __init__(self, year: int | None = None, name: str | None = None):
+    def __init__(
+        self,
+        id: int,
+        year: int,
+        name: str,
+        status: int | OlympStatus
+    ):
+        self.__id = id
+        self.__year = year
+        self.__name = name
+        self.__status = OlympStatus(status) if isinstance(status, int) else status
+
+    @classmethod
+    def from_year_name(cls, year: int | None = None, name: str | None = None):
         if not year:
             year = datetime.today().year
+        q = "SELECT id, year, name, status FROM olymps WHERE year = ?"
+        parameters = [year]
         if name:
-            if not value_exists('olymps', {'year': year, 'name': name}):
-                raise UserError(f"Олимпиады {name} за {year} год не существует")
-            with sqlite3.connect(DATABASE) as conn:
-                cur = conn.cursor()
-                cur.execute("SELECT id, status FROM olymps WHERE year = ? AND name = ?", (year, name))
-                id, status = cur.fetchone()
-                status = OlympStatus(status)
-        else:
-            if not value_exists('olymps', {'year': year}):
-                raise UserError(f"Нет олимпиад за {year} год")
-            with sqlite3.connect(DATABASE) as conn:
-                cur = conn.cursor()
-                cur.execute("SELECT id, status, name FROM olymps WHERE year = ?", (year,))
-                fetch = cur.fetchall()
-                if len(fetch) > 1:
-                    raise UserError(f"Есть несколько олимпиад за {year} год. Укажите имя")
-                id, status, name = fetch[0]
-                status = OlympStatus(status)
-        self.__id: int = id
-        self.__year: int = year
-        self.__name: str = name
-        self.__status: OlympStatus = status
+            q += " AND name = ?"
+            parameters.append(name)
+        with sqlite3.connect(DATABASE) as conn:
+            cur = conn.cursor()
+            cur.execute(q, tuple(parameters))
+            fetch = cur.fetchall()
+        if not fetch:
+            raise UserError(
+                f"Олимпиады {name} за {year} год не найдено"
+                if name else
+                f"Нет олимпиад за {year} год"
+            )
+        if len(fetch) > 1:
+            raise UserError(f"Есть несколько олимпиад за {year} год. Укажите имя")
+        return cls(*fetch[0])
     
     
     @classmethod
@@ -51,9 +59,11 @@ class Olymp:
         exists = value_exists("olymps", {"year": year, "name": name})
         if exists:
             raise ValueError(f"Олимпиада {name} за {year} год уже есть в базе")
-        cursor.execute("INSERT INTO olymps(year, name, status) VALUES (?, ?, ?)", (year, name, status))
+        values = (year, name, status)
+        cursor.execute("INSERT INTO olymps(year, name, status) VALUES (?, ?, ?)", values)
         cursor.connection.commit()
-        return Olymp(year, name)
+        created_id = cursor.lastrowid
+        return Olymp(created_id, *values)
 
 
     def __set(self, column: str, value):
