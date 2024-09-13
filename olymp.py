@@ -63,7 +63,7 @@ class Olymp:
         cursor.execute("INSERT INTO olymps(year, name, status) VALUES (?, ?, ?)", values)
         cursor.connection.commit()
         created_id = cursor.lastrowid
-        return Olymp(created_id, *values)
+        return cls(created_id, *values)
 
 
     def __set(self, column: str, value):
