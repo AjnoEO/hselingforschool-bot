@@ -2,6 +2,9 @@ import sqlite3
 from functools import wraps
 from db import DATABASE
 
+class UserError(Exception):
+    """Ошибки, вызванные неправильными действиями пользователей"""
+
 def provide_cursor(func):
     """
     Даёт возможность не указывать курсор SQLite при вызове функции 

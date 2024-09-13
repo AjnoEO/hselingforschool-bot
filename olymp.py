@@ -2,8 +2,8 @@ from datetime import datetime
 from statuses import OlympStatus
 import sqlite3
 from db import DATABASE
-from users import Participant, Examiner, UserError
-from utils import value_exists, provide_cursor, update_in_table
+from users import Participant, Examiner
+from utils import UserError, value_exists, provide_cursor, update_in_table
 
 
 class Olymp:

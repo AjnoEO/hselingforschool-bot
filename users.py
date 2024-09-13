@@ -1,10 +1,7 @@
 import sqlite3
 from db import DATABASE
-from utils import provide_cursor, value_exists, update_in_table
+from utils import UserError, provide_cursor, value_exists, update_in_table
 from queue_entry import QueueEntry, QueueStatus
-
-class UserError(Exception):
-    """Ошибки, вызванные неправильными действиями пользователей"""
 
 
 class User:
