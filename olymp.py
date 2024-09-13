@@ -23,7 +23,7 @@ class Olymp:
     def from_year_name(cls, year: int | None = None, name: str | None = None):
         if not year:
             year = datetime.today().year
-        q = "SELECT id, year, name, status FROM olymps WHERE year = ?"
+        q = "SELECT * FROM olymps WHERE year = ?"
         parameters = [year]
         if name:
             q += " AND name = ?"
