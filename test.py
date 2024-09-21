@@ -3,7 +3,7 @@ from db import DATABASE, create_tables
 from users import User, Participant, Examiner
 from olymp import Olymp, OlympStatus
 from queue_entry import QueueEntry, QueueStatus
-from problem import Problem
+from problem import Problem, ProblemBlock, BlockType
 
 class TestError:
     """Ошибка при тестировании"""
@@ -30,8 +30,19 @@ p.grade = 2
 e.busyness_level += 1
 print(Participant.from_id(2).name)
 print(Examiner.from_id(2).surname)
-problem_1: Problem = Problem.create(olymp2007.id, 1, None, "minors")
-Problem.create(olymp2007.id, 2, 1, "majors")
+problem_1: Problem = Problem.create(olymp2007.id, "minors")
+Problem.create(olymp2007.id, "majors")
+problem_2 = Problem.from_id(2)
+problem_3: Problem = Problem.create(olymp2007.id, "mezors?")
+try:
+    ProblemBlock.create(olymp2007.id, [problem_1, problem_1, problem_1])
+except Exception as err:
+    print(f"Ура, оно упало: {err}")
+try:
+    ProblemBlock.create(olymp2007.id, [problem_2])
+except Exception as err:
+    print(f"Ура, оно упало: {err}")
+problem_block = ProblemBlock.create(olymp2007.id, [problem_1, problem_2, problem_3], BlockType.JUNIOR_1, "jun1.pdf")
 # problem_2: Problem = Problem.from_junior_number(olymp2007.id, 2)
 # print(problem_2.name)
 # problem_1.junior_number = 3

@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS `problem_blocks` (
 	`id` integer primary key NOT NULL UNIQUE,
 	`olymp_id` INTEGER NOT NULL,
 	`block_type` INTEGER,
-	`file` TEXT,
+	`path` TEXT,
 	`first_problem` INTEGER NOT NULL,
 	`second_problem` INTEGER NOT NULL,
 	`third_problem` INTEGER NOT NULL,

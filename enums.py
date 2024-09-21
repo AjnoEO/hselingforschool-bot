@@ -32,7 +32,7 @@ class QueueStatus(SqliteCompatibleEnum):
             return active_statuses
 
 
-class BlockType(Enum):
+class BlockType(SqliteCompatibleEnum):
     JUNIOR_1 = 0
     JUNIOR_2 = 1
     JUNIOR_3 = 2
