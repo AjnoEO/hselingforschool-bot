@@ -3,6 +3,7 @@ olymp.db
 
 # Конфиденциальная инфа
 config.ini
+private.txt
 
 # Кэш
 __pycache__
