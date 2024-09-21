@@ -17,6 +17,7 @@ class Olymp:
         self.__name = name
         self.__status = OlympStatus(status) if isinstance(status, int) else status
 
+
     @classmethod
     def from_name(cls, name: str):
         with sqlite3.connect(DATABASE) as conn:
@@ -35,7 +36,7 @@ class Olymp:
         name: str,
         status: OlympStatus = OlympStatus.TBA,
         *,
-        cursor: sqlite3.Cursor,
+        cursor: sqlite3.Cursor | None = None,
     ):
         """
         Добавить год в таблицу olymps
@@ -48,6 +49,18 @@ class Olymp:
         cursor.connection.commit()
         created_id = cursor.lastrowid
         return cls(created_id, *values)
+
+
+    @classmethod
+    @provide_cursor
+    def current(cls, *, cursor: sqlite3.Cursor | None = None):
+        cursor.execute("SELECT * FROM olymps WHERE status != ?", (OlympStatus.RESULTS,))
+        fetch = cursor.fetchall()
+        if len(fetch) > 1:
+            raise ValueError("Найдено более одной текущей олимпиады")
+        if len(fetch) == 0:
+            return None
+        return Olymp(*fetch[0])
 
 
     def __set(self, column: str, value):
@@ -69,13 +82,13 @@ class Olymp:
         self.__status = status
 
     @provide_cursor
-    def get_participants(self, *, cursor: sqlite3.Cursor) -> list[Participant]:
+    def get_participants(self, *, cursor: sqlite3.Cursor | None = None) -> list[Participant]:
         cursor.execute("SELECT user_id FROM participants WHERE olymp_id = ?", (self.id,))
         results = cursor.fetchall()
         return [Participant.from_user_id(user_id) for user_id in results]
     
     @provide_cursor
-    def get_examiners(self, *, only_free: bool = False, order_by_busyness: bool = False, cursor: sqlite3.Cursor) -> list[Participant]:
+    def get_examiners(self, *, only_free: bool = False, order_by_busyness: bool = False, cursor: sqlite3.Cursor | None = None) -> list[Participant]:
         q = "SELECT user_id FROM examiners WHERE olymp_id = ?"
         if only_free:
             q += " AND is_busy = 0"

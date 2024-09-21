@@ -28,7 +28,7 @@ class User:
         surname: str,
         *,
         tg_id: int | None = None,
-        cursor: sqlite3.Cursor,
+        cursor: sqlite3.Cursor | None = None,
     ):
         """
         Добавить пользователя в таблицу users
@@ -269,7 +269,7 @@ class Participant(OlympMember):
         grade: int,
         olymp_id: int,
         *,
-        cursor: sqlite3.Cursor,
+        cursor: sqlite3.Cursor | None = None,
     ):
         """
         Добавить пользователя как участника в таблицу participants
@@ -299,7 +299,7 @@ class Participant(OlympMember):
         olymp_id: int,
         *,
         tg_id: int | None = None,
-        cursor: sqlite3.Cursor,
+        cursor: sqlite3.Cursor | None = None,
     ):
         """
         Добавить пользователя в таблицу users и добавить его как участника в таблицу participants
@@ -392,7 +392,7 @@ class Examiner(OlympMember):
         *,
         busyness_level: int = 0,
         is_busy: bool = True,
-        cursor: sqlite3.Cursor,
+        cursor: sqlite3.Cursor | None = None,
     ):
         """
         Добавить пользователя как принимающего в таблицу examiners
@@ -433,7 +433,7 @@ class Examiner(OlympMember):
         tg_id: int | None = None,
         busyness_level: int = 0,
         is_busy: bool = True,
-        cursor: sqlite3.Cursor,
+        cursor: sqlite3.Cursor | None = None,
     ):
         """
         Добавить пользователя в таблицу users и добавить его как принимающего в таблицу examiners

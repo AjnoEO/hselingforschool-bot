@@ -43,7 +43,7 @@ class Problem:
         olymp_id: int,
         name: str,
         *,
-        cursor: sqlite3.Cursor,
+        cursor: sqlite3.Cursor | None = None,
     ):
         """
         Добавить задачу в таблицу problems
@@ -132,7 +132,7 @@ class ProblemBlock:
         block_type: BlockType | None = None,
         path: str | None = None,
         *,
-        cursor: sqlite3.Cursor,
+        cursor: sqlite3.Cursor | None = None,
     ):
         """
         Добавить блок задач в таблицу problem_blocks

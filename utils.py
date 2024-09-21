@@ -22,7 +22,7 @@ def provide_cursor(func):
     return wrapper
 
 @provide_cursor
-def value_exists(table: str, column_values: dict[str], *, cursor: sqlite3.Cursor) -> bool:
+def value_exists(table: str, column_values: dict[str], *, cursor: sqlite3.Cursor | None = None) -> bool:
     conditions = []
     values = []
     for c, v in column_values.items():
