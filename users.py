@@ -9,13 +9,13 @@ class User:
         self,
         user_id: int,
         tg_id: int | None,
-        tg_handle: int,
+        tg_handle: str,
         name: str,
         surname: str
     ):
         self.__user_id: int = user_id
         self.__tg_id: int | None = tg_id
-        self.__tg_handle: str = tg_handle
+        self.__tg_handle: str = tg_handle.lower()
         self.__name: str = name
         self.__surname: str = surname
 
@@ -33,6 +33,7 @@ class User:
         """
         Добавить пользователя в таблицу users
         """
+        tg_handle = tg_handle.lower()
         exists = value_exists("users", {"tg_handle": tg_handle})
         if exists:
             raise ValueError(f"Пользователь @{tg_handle} уже есть в базе")
@@ -54,10 +55,12 @@ class User:
         user_id: int | None = None,
         tg_id: int | None = None,
         tg_handle: str | None = None,
-        error_message_no_id_provided: str = "Требуется идентификатор пользователя",
-        error_message_user_not_found: str = "Пользователь не найден в базе",
-        error_message_ids_dont_match: str = "Данные идентификаторы не соответствуют"
+        error_no_id_provided: str = "Требуется идентификатор пользователя",
+        error_user_not_found: str | None = "Пользователь не найден в базе",
+        error_ids_dont_match: str = "Данные идентификаторы не соответствуют"
     ):
+        if tg_handle:
+            tg_handle = tg_handle.lower()
         if tg_id:
             checked_column = "tg_id"
             given_value = tg_id
@@ -68,11 +71,13 @@ class User:
             checked_column = "tg_handle"
             given_value = tg_handle
         else:
-            raise ValueError(error_message_no_id_provided)
+            raise ValueError(error_no_id_provided)
         with sqlite3.connect(DATABASE) as conn:
             cur = conn.cursor()
             if not value_exists("users", {checked_column: given_value}, cursor=cur):
-                raise UserError(error_message_user_not_found)
+                if not error_user_not_found:
+                    return None
+                raise UserError(error_user_not_found)
             q = f"""
                 SELECT
                     user_id,
@@ -91,7 +96,7 @@ class User:
         if ((tg_id and user.tg_id != tg_id)
             or (user_id and user.user_id != user_id)
             or (tg_handle and user.tg_handle != tg_handle)):
-            raise ValueError(error_message_ids_dont_match)
+            raise ValueError(error_ids_dont_match)
         return user
 
     @classmethod
@@ -115,7 +120,7 @@ class User:
     def tg_handle(self): return self.__tg_handle
     @tg_handle.setter
     def tg_handle(self, value: str):
-        self.__set('tg_handle', value)
+        self.__set('tg_handle', value.lower())
         self.__tg_handle = value
     @property
     def tg_id(self): return self.__tg_id
@@ -163,18 +168,22 @@ class OlympMember(User):
         user_id: int | None = None,
         tg_id: int | None = None,
         tg_handle: str | None = None,
-        error_message_no_id_provided: str = "Требуется идентификатор пользователя",
-        error_message_user_not_found: str = "Пользователь не найден в базе",
-        error_message_ids_dont_match: str = "Данные идентификаторы не соответствуют"
+        error_no_id_provided: str = "Требуется идентификатор пользователя",
+        error_user_not_found: str | None = "Пользователь не найден в базе",
+        error_ids_dont_match: str = "Данные идентификаторы не соответствуют"
     ):
         user = User.from_db(user_id=user_id, tg_id=tg_id, tg_handle=tg_handle,
-                            error_message_no_id_provided=error_message_no_id_provided,
-                            error_message_user_not_found=error_message_user_not_found,
-                            error_message_ids_dont_match=error_message_ids_dont_match)
+                            error_no_id_provided=error_no_id_provided,
+                            error_user_not_found=error_user_not_found,
+                            error_ids_dont_match=error_ids_dont_match)
+        if not user:
+            return None
         with sqlite3.connect(DATABASE) as conn:
             cur = conn.cursor()
             if not value_exists(table, {"user_id": user.user_id, "olymp_id": olymp_id}, cursor = cur):
-                raise UserError(error_message_user_not_found)
+                if not error_user_not_found:
+                    return None
+                raise UserError(error_user_not_found)
             q = f"""
                 SELECT
                     {", ".join(additional_keys)}
@@ -197,15 +206,21 @@ class OlympMember(User):
         )
 
     @classmethod
-    def from_user_id(cls, user_id: int, olymp_id: int):
-        return cls.from_db(olymp_id, user_id=user_id)
+    def from_user_id(cls, user_id: int, olymp_id: int, no_error: bool = False):
+        if no_error:
+            return cls.from_db(olymp_id, user_id=user_id, error_user_not_found=None)
+        return cls.from_db(olymp_id, user_id=user_id) 
 
     @classmethod
-    def from_tg_id(cls, tg_id: int, olymp_id: int):
+    def from_tg_id(cls, tg_id: int, olymp_id: int, no_error: bool = False):
+        if no_error:
+            return cls.from_db(olymp_id, tg_id=tg_id, error_user_not_found=None)
         return cls.from_db(olymp_id, tg_id=tg_id)
 
     @classmethod
-    def from_tg_handle(cls, tg_handle: str, olymp_id: int):
+    def from_tg_handle(cls, tg_handle: str, olymp_id: int, no_error: bool = False):
+        if no_error:
+            return cls.from_db(olymp_id, tg_handle=tg_handle, error_user_not_found=None)
         return cls.from_db(olymp_id, tg_handle=tg_handle)
 
     @classmethod
@@ -214,14 +229,16 @@ class OlympMember(User):
         id: int, 
         table: str,
         *,
-        error_message_user_not_found: str = "Пользователь не найден в базе",        
+        error_user_not_found: str | None = "Пользователь не найден в базе",
     ):
         with sqlite3.connect(DATABASE) as conn:
             cur = conn.cursor()
             cur.execute(f"SELECT user_id, olymp_id FROM {table} WHERE id = ?", (id,))
             fetch = cur.fetchone()
             if fetch is None:
-                raise UserError(error_message_user_not_found)
+                if not error_user_not_found:
+                    return None
+                raise UserError(error_user_not_found)
             user_id, olymp_id = fetch
             return cls.from_user_id(user_id, olymp_id)
 
@@ -314,7 +331,9 @@ class Participant(OlympMember):
         *,
         user_id: int | None = None,
         tg_id: int | None = None,
-        tg_handle: str | None = None
+        tg_handle: str | None = None,
+        error_user_not_found: str | None = ("Участник не найден. Если вы участник, "
+                                            "авторизуйтесь при помощи команды /start.")
     ):
         participant = super().from_db(
             olymp_id,
@@ -323,17 +342,20 @@ class Participant(OlympMember):
             user_id = user_id, 
             tg_id = tg_id,
             tg_handle = tg_handle,
-            error_message_no_id_provided = "Требуется идентификатор участника",
-            error_message_user_not_found = ("Участник не найден. Если вы участник, "
-                                            "авторизуйтесь при помощи команды /start.")
+            error_no_id_provided = "Требуется идентификатор участника",
+            error_user_not_found = error_user_not_found
         )
+        if not participant:
+            return None
         participant.__id = participant._additional_values["id"]
         participant.__grade = participant._additional_values["grade"]
         return participant
 
     @classmethod
-    def from_id(cls, id: int):
-        return super().from_id(id, "participants", error_message_user_not_found="Участник не найден")
+    def from_id(cls, id: int, no_error: bool = False):
+        if no_error:
+            return super().from_id(id, "participants", error_user_not_found=None)
+        return super().from_id(id, "participants", error_user_not_found="Участник не найден")
 
     @property
     def queue_entry(self, *, error_if_none: str | None = None):
@@ -409,12 +431,10 @@ class Examiner(OlympMember):
             (user_id, olymp_id, conference_link, busyness_level, int(is_busy))
         )
         examiner_id = cursor.lastrowid
-        q = "INSERT INTO examiner_problems(examiner_id, problem_id) VALUES " + ",".join(["(?, ?)"] * len(problems))
+        q = "INSERT INTO examiner_problems(examiner_id, problem_id) VALUES " + ", ".join(["(?, ?)"] * len(problems))
         p = []
         for problem_id in problems:
             p += [examiner_id, problem_id]
-        print(q)
-        print(tuple(p))
         cursor.execute(q, tuple(p))
         cursor.connection.commit()
         return Examiner.from_user_id(user_id, olymp_id)
@@ -451,7 +471,9 @@ class Examiner(OlympMember):
         *,
         user_id: int | None = None,
         tg_id: int | None = None,
-        tg_handle: str | None = None
+        tg_handle: str | None = None,
+        error_user_not_found: str | None = ("Принимающий не найден. Если вы принимающий, "
+                                            "авторизуйтесь при помощи команды /start.")
     ):
         examiner = super().from_db(
             olymp_id,
@@ -460,10 +482,11 @@ class Examiner(OlympMember):
             user_id = user_id, 
             tg_id = tg_id,
             tg_handle = tg_handle,
-            error_message_no_id_provided = "Требуется идентификатор принимающего",
-            error_message_user_not_found = ("Принимающий не найден. Если вы принимающий, "
-                                            "авторизуйтесь при помощи команды /start.")
+            error_no_id_provided = "Требуется идентификатор принимающего",
+            error_user_not_found = error_user_not_found
         )
+        if not examiner:
+            return None
         examiner.__id = examiner._additional_values["id"]
         examiner.__conference_link = examiner._additional_values["conference_link"]
         examiner.__busyness_level = examiner._additional_values["busyness_level"]
@@ -476,8 +499,10 @@ class Examiner(OlympMember):
         return examiner
 
     @classmethod
-    def from_id(cls, id: int):
-        return super().from_id(id, "examiners", error_message_user_not_found="Принимающий не найден")
+    def from_id(cls, id: int, no_error: bool = False):
+        if no_error:
+            return super().from_id(id, "examiners", error_user_not_found=None)
+        return super().from_id(id, "examiners", error_user_not_found="Принимающий не найден")
 
     @property
     def queue_entry(self, *, error_if_none: str | None = None):
