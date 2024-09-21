@@ -1,6 +1,6 @@
 from enum import Enum
 import sqlite3
-from statuses import OlympStatus, QueueStatus
+from enums import OlympStatus, QueueStatus, BlockType
 
 DATABASE = "olymp.db"
 
@@ -26,3 +26,4 @@ def create_tables(script_file: str):
         con.commit()
         set_enum(OlympStatus, "olymp_status", cursor=cur)
         set_enum(QueueStatus, "queue_status", cursor=cur)
+        set_enum(BlockType, "block_types", cursor=cur)

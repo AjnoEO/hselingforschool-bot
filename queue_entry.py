@@ -1,5 +1,5 @@
 import sqlite3
-from statuses import QueueStatus
+from enums import QueueStatus
 from utils import update_in_table
 
 class QueueEntry:

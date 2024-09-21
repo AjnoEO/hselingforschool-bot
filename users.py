@@ -362,16 +362,18 @@ class Examiner(OlympMember):
         name: str,
         surname: str,
         conference_link: str,
-        problems: list[int] | str,
         busyness_level: int,
         is_busy: bool | int,
-        id: int
+        id: int,
+        problems: list[int] | str | None = None
     ):
         super().__init__(olymp_id, user_id, tg_id, tg_handle, name, surname,
                          id=id, conference_link=conference_link, problems=problems,
                          busyness_level=busyness_level, is_busy=is_busy)
         if isinstance(problems, str):
             problems = list(map(int, problems.split(",")))
+        if problems is None:
+            problems = []
         self.__id: int = id
         self.__conference_link: str = conference_link
         self.__problems: list[int] = problems
@@ -403,9 +405,17 @@ class Examiner(OlympMember):
         if exists:
             raise ValueError(f"Пользователь {user_id} уже проверяющий в олимпиаде {olymp_id}")
         cursor.execute(
-            "INSERT INTO examiners(user_id, olymp_id, conference_link, problems, busyness_level, is_busy) VALUES (?, ?, ?, ?, ?, ?)", 
-            (user_id, olymp_id, conference_link, ",".join(map(str, problems)), busyness_level, int(is_busy))
+            "INSERT INTO examiners(user_id, olymp_id, conference_link, busyness_level, is_busy) VALUES (?, ?, ?, ?, ?)", 
+            (user_id, olymp_id, conference_link, busyness_level, int(is_busy))
         )
+        examiner_id = cursor.lastrowid
+        q = "INSERT INTO examiner_problems(examiner_id, problem_id) VALUES " + ",".join(["(?, ?)"] * len(problems))
+        p = []
+        for problem_id in problems:
+            p += [examiner_id, problem_id]
+        print(q)
+        print(tuple(p))
+        cursor.execute(q, tuple(p))
         cursor.connection.commit()
         return Examiner.from_user_id(user_id, olymp_id)
 
@@ -446,7 +456,7 @@ class Examiner(OlympMember):
         examiner = super().from_db(
             olymp_id,
             "examiners", 
-            ["id", "problems", "conference_link", "busyness_level", "is_busy"], 
+            ["id", "conference_link", "busyness_level", "is_busy"], 
             user_id = user_id, 
             tg_id = tg_id,
             tg_handle = tg_handle,
@@ -456,9 +466,13 @@ class Examiner(OlympMember):
         )
         examiner.__id = examiner._additional_values["id"]
         examiner.__conference_link = examiner._additional_values["conference_link"]
-        examiner.__problems = list(map(int, examiner._additional_values["problems"].split(",")))
         examiner.__busyness_level = examiner._additional_values["busyness_level"]
         examiner.__is_busy = bool(examiner._additional_values["is_busy"])
+        with sqlite3.connect(DATABASE) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT problem_id FROM examiner_problems WHERE examiner_id = ?", (examiner.__id,))
+            result = cur.fetchall()
+        examiner.__problems = [fetch[0] for fetch in result]
         return examiner
 
     @classmethod

@@ -1,5 +1,5 @@
 from datetime import datetime
-from statuses import OlympStatus
+from enums import OlympStatus
 import sqlite3
 from db import DATABASE
 from users import Participant, Examiner
@@ -10,44 +10,28 @@ class Olymp:
     def __init__(
         self,
         id: int,
-        year: int,
         name: str,
         status: int | OlympStatus
     ):
         self.__id = id
-        self.__year = year
         self.__name = name
         self.__status = OlympStatus(status) if isinstance(status, int) else status
 
     @classmethod
-    def from_year_name(cls, year: int | None = None, name: str | None = None):
-        if not year:
-            year = datetime.today().year
-        q = "SELECT * FROM olymps WHERE year = ?"
-        parameters = [year]
-        if name:
-            q += " AND name = ?"
-            parameters.append(name)
+    def from_name(cls, name: str):
         with sqlite3.connect(DATABASE) as conn:
             cur = conn.cursor()
-            cur.execute(q, tuple(parameters))
-            fetch = cur.fetchall()
+            cur.execute("SELECT * FROM olymps WHERE name = ?", (name,))
+            fetch = cur.fetchone()
         if not fetch:
-            raise UserError(
-                f"Олимпиады {name} за {year} год не найдено"
-                if name else
-                f"Нет олимпиад за {year} год"
-            )
-        if len(fetch) > 1:
-            raise UserError(f"Есть несколько олимпиад за {year} год. Укажите имя")
-        return cls(*fetch[0])
+            raise UserError(f"Олимпиады {name} не найдено")
+        return cls(*fetch)
     
     
     @classmethod
     @provide_cursor
     def create(
         cls,
-        year: int,
         name: str,
         status: OlympStatus = OlympStatus.TBA,
         *,
@@ -56,11 +40,11 @@ class Olymp:
         """
         Добавить год в таблицу olymps
         """
-        exists = value_exists("olymps", {"year": year, "name": name})
+        exists = value_exists("olymps", {"name": name})
         if exists:
-            raise ValueError(f"Олимпиада {name} за {year} год уже есть в базе")
-        values = (year, name, status)
-        cursor.execute("INSERT INTO olymps(year, name, status) VALUES (?, ?, ?)", values)
+            raise ValueError(f"Олимпиада {name} уже есть в базе")
+        values = (name, status)
+        cursor.execute("INSERT INTO olymps(name, status) VALUES (?, ?)", values)
         cursor.connection.commit()
         created_id = cursor.lastrowid
         return cls(created_id, *values)
@@ -71,8 +55,6 @@ class Olymp:
 
     @property
     def id(self): return self.__id
-    @property
-    def year(self): return self.__year
     @property
     def name(self): return self.__name
     @name.setter

@@ -1,3 +1,4 @@
+from enums import BlockType
 import sqlite3
 from db import DATABASE
 from utils import UserError, update_in_table, provide_cursor, value_exists
@@ -7,14 +8,10 @@ class Problem:
         self,
         id: int,
         olymp_id: int,
-        junior_number: int | None,
-        senior_number: int | None,
         name: str
     ):
         self.__id = id
         self.__olymp_id = olymp_id
-        self.__junior_number = junior_number
-        self.__senior_number = senior_number
         self.__name = name
 
     @classmethod
@@ -38,14 +35,6 @@ class Problem:
         if not fetch:
             raise UserError(f"Задача номер {number_value} не найдена")
         return cls(*fetch)
-    
-    @classmethod
-    def from_junior_number(cls, olymp_id: int, number: int):
-        return cls.__from_number(olymp_id, "junior_no", number)
-    
-    @classmethod
-    def from_senior_number(cls, olymp_id: int, number: int):
-        return cls.__from_number(olymp_id, "senior_no", number)
 
     @classmethod
     @provide_cursor
@@ -61,18 +50,14 @@ class Problem:
         """
         Добавить задачу в таблицу problems
         """
-        cursor.execute("SELECT * FROM problems WHERE olymp_id = ?", (olymp_id,))
+        cursor.execute("SELECT id, name FROM problems WHERE olymp_id = ?", (olymp_id,))
         fetch = cursor.fetchall()
         for f in fetch:
             pr_id = f[0]
-            if f[1] == junior_no:
-                UserError(f"Номер {junior_no} для младших классов уже занят задачей {pr_id}")
-            if f[2] == senior_no:
-                UserError(f"Номер {senior_no} для старших классов уже занят задачей {pr_id}")
-            if f[3] == name:
+            if f[1] == name:
                 UserError(f"Название {name} уже занято задачей {pr_id}")
-        values = (olymp_id, junior_no, senior_no, name)
-        cursor.execute("INSERT INTO problems(olymp_id, junior_no, senior_no, name) VALUES (?, ?, ?, ?)", values)
+        values = (olymp_id, name)
+        cursor.execute("INSERT INTO problems(olymp_id, name) VALUES (?, ?)", values)
         cursor.connection.commit()
         created_id = cursor.lastrowid
         return cls(created_id, *values)
@@ -85,20 +70,11 @@ class Problem:
     @property
     def olymp_id(self): return self.__olymp_id
     @property
-    def junior_number(self): return self.__junior_number
-    @junior_number.setter
-    def junior_number(self, value: int):
-        self.__set("junior_no", value)
-        self.__junior_number = value
-    @property
-    def senior_number(self): return self.__senior_number
-    @senior_number.setter
-    def senior_number(self, value: int):
-        self.__set("senior_no", value)
-        self.__senior_number = value
-    @property
     def name(self): return self.__name
     @name.setter
     def name(self, value: str):
         self.__set("name", value)
         self.__name = value
+
+# class ProblemBlock:
+

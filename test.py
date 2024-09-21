@@ -17,8 +17,8 @@ if os.path.exists(DATABASE):
     os.remove(DATABASE)
 create_tables("db.sql")
 
-Olymp.create(1, "тестище", OlympStatus.RESULTS)
-olymp2007: Olymp = Olymp.create(2007, "верните мне мой")
+Olymp.create("тестище", OlympStatus.RESULTS)
+olymp2007: Olymp = Olymp.create("верните мне мой 2007")
 ajno: User = User.create("ajnoeo", "Тёма", "Бойко")
 ajno_p: Participant = Participant.create_for_existing_user(ajno, 12, olymp2007.id)
 ajno_e: Examiner = Examiner.create_for_existing_user(ajno, "aboba.ru", [1,3,6], olymp2007.id, is_busy=False)
@@ -32,7 +32,7 @@ print(Participant.from_id(2).name)
 print(Examiner.from_id(2).surname)
 problem_1: Problem = Problem.create(olymp2007.id, 1, None, "minors")
 Problem.create(olymp2007.id, 2, 1, "majors")
-problem_2: Problem = Problem.from_junior_number(olymp2007.id, 2)
-print(problem_2.name)
-problem_1.junior_number = 3
-print(Problem.from_id(1).junior_number)
+# problem_2: Problem = Problem.from_junior_number(olymp2007.id, 2)
+# print(problem_2.name)
+# problem_1.junior_number = 3
+# print(Problem.from_id(1).junior_number)
