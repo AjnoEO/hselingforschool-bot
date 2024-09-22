@@ -1,12 +1,14 @@
 import os
+from pathlib import Path
+import re
 from data import TOKEN, OWNER_ID, OWNER_HANDLE
 import telebot
 from telebot.types import Message
 from telebot.custom_filters import SimpleCustomFilter
 from olymp import Olymp, OlympStatus
 from users import OlympMember, Participant, Examiner
-from utils import UserError, decline
-import requests
+from problem import Problem, ProblemBlock, BlockType
+from utils import UserError, decline, get_arg, get_n_args, get_file
 import pandas as pd
 
 
@@ -46,7 +48,6 @@ class OwnerOnly(SimpleCustomFilter):
     @staticmethod
     def check(message: Message):
         return message.from_user.id == OWNER_ID
-
 bot.add_custom_filter(OwnerOnly())
 
 current_olymp = Olymp.current()
@@ -96,14 +97,11 @@ def send_welcome(message: Message):
 @bot.message_handler(commands=['olymp_registration_start', 'olymp_reg_start'], owner_only = True)
 def olymp_reg_start(message: Message):
     if not current_olymp:
-        bot.send_message(message.chat.id, "Нет текущей олимпиады")
-        return
+        raise UserError("Нет текущей олимпиады")
     if current_olymp.status == OlympStatus.REGISTRATION:
-        bot.send_message(message.chat.id, "Регистрация уже идёт")
-        return
+        raise UserError("Регистрация уже идёт")
     if current_olymp.status != OlympStatus.TBA:
-        bot.send_message(message.chat.id, "Олимпиада уже идёт или завершилась")
-        return
+        raise UserError("Олимпиада уже идёт или завершилась")
     current_olymp.status = OlympStatus.REGISTRATION
     bot.send_message(message.chat.id, f"Регистрация на олимпиаду _{current_olymp.name}_ запущена")
 
@@ -111,17 +109,13 @@ def olymp_reg_start(message: Message):
 @bot.message_handler(commands=['olymp_finish'], owner_only = True)
 def olymp_finish(message: Message):
     if not current_olymp:
-        bot.send_message(message.chat.id, "Нет текущей олимпиады")
-        return
+        raise UserError("Нет текущей олимпиады")
     if current_olymp.status == OlympStatus.RESULTS:
-        bot.send_message(message.chat.id, "Олимпиада уже завершена")
-        return
+        raise UserError("Олимпиада уже завершена")
     if current_olymp.status == OlympStatus.QUEUE:
-        bot.send_message(message.chat.id, "Олимпиада уже завершается, происходит работа с очередью")
-        return
+        raise UserError("Олимпиада уже завершается, происходит работа с очередью")
     if current_olymp.status != OlympStatus.CONTEST:
-        bot.send_message(message.chat.id, "Олимпиада ещё не начата")
-        return
+        raise UserError("Олимпиада ещё не начата")
     
     participants = current_olymp.get_participants()
     examiners = current_olymp.get_examiners()
@@ -156,14 +150,11 @@ def olymp_finish(message: Message):
 @bot.message_handler(commands=['olymp_start'], owner_only = True)
 def olymp_start(message: Message):
     if not current_olymp:
-        bot.send_message(message.chat.id, "Нет текущей олимпиады")
-        return
+        raise UserError("Нет текущей олимпиады")
     if current_olymp.status == OlympStatus.TBA:
-        bot.send_message(message.chat.id, "Сначала необходимо запустить регистрацию")
-        return
+        raise UserError("Сначала необходимо запустить регистрацию")
     if current_olymp.status != OlympStatus.REGISTRATION:
-        bot.send_message(message.chat.id, "Олимпиада уже идёт или завершилась")
-        return
+        raise UserError("Олимпиада уже идёт или завершилась")
     current_olymp.status = OlympStatus.CONTEST
     participants = current_olymp.get_participants()
     for p in participants:
@@ -185,11 +176,7 @@ def olymp_create(message: Message):
             f"Уже имеется незавершённая олимпиада _{current_olymp.name}_. Заверши её, чтобы создать новую"
         )
         return
-    command_arg = message.text.split(maxsplit=1)
-    if len(command_arg) == 1:
-        bot.send_message(message.chat.id, "Для олимпиады необходимо название")
-        return
-    name = command_arg[1]
+    name = get_arg(message, "Для олимпиады необходимо название")
     current_olymp = Olymp.create(name)
     bot.send_message(message.chat.id, f"Олимпиада _{current_olymp.name}_ успешно создана")
 
@@ -197,17 +184,10 @@ def olymp_create(message: Message):
 def upload_members(message: Message, required_columns: list[str], member_class: type[OlympMember],
                    term_stem: str, term_endings: tuple[str]):
     if not current_olymp:
-        bot.send_message(message.chat.id, "Нет текущей олимпиады")
-        return
+        raise UserError("Нет текущей олимпиады")
     if current_olymp.status != OlympStatus.TBA:
-        bot.send_message(message.chat.id, "Регистрация на олимпиаду или олимпиада уже начата")
-        return
-    if not message.document and not (message.reply_to_message and message.reply_to_message.document):
-        bot.send_message(message.chat.id, "Необходимо указать Excel-таблицу")
-        return
-    document: telebot.types.Document = message.document or message.reply_to_message.document
-    file_path = bot.get_file(document.file_id).file_path
-    file_data = requests.get(f"https://api.telegram.org/file/bot{TOKEN}/{file_path}").content
+        raise UserError("Регистрация на олимпиаду или олимпиада уже начата")
+    file_data = get_file(message, bot, "Необходимо указать Excel-таблицу")
     member_table = pd.read_excel(file_data)
     if set(member_table.columns) != set(required_columns):
         bot.send_message(message.chat.id, "Таблица должна содержать столбцы " + ', '.join([f'`{col}`' for col in required_columns]))
@@ -239,6 +219,43 @@ def olymp_info(message: Message):
                     f"ID: `{current_olymp.id}`\n"
                     f"Состояние: `{current_olymp.status.name}`")
     bot.send_message(message.chat.id, response)
+
+
+@bot.message_handler(commands=['problem_create'], owner_only=True)
+def problem_create(message: Message):
+    if not current_olymp:
+        raise UserError("Нет текущей олимпиады")
+    name = get_arg(message, "Для задачи необходимо название")
+    problem = Problem.create(current_olymp.id, name)
+    bot.send_message(message.chat.id, f"Задача _{problem.name}_ добавлена! ID: `{problem.id}`")
+
+
+@bot.message_handler(commands=['problem_block_create'], owner_only=True)
+def problem_block_create(message: Message):
+    if not current_olymp:
+        raise UserError("Нет текущей олимпиады")
+    file = get_file(message, bot, "Необходим файл с условиями задач", ".pdf")
+    args = get_n_args(message, 3, 4, "Необходимо указать задачи для блока")
+    problems = list(map(int, args[:3]))
+    block_type = None
+    if len(args) > 3:
+        if not re.match(r"^(JUNIOR|SENIOR)_[123]$", args[3]):
+            raise UserError("Тип блока должен быть указан в форме `(JUNIOR|SENIOR)_(1|2|3)`")
+        block_type = BlockType[args[3]]
+    filename = telebot.util.generate_random_token()
+    dir = "downloaded_files"
+    Path(dir).mkdir(exist_ok=True)
+    path = os.path.join(dir, filename + ".pdf")
+    with open(path, "wb") as f:
+        f.write(file)
+    problem_block = ProblemBlock.create(current_olymp.id, problems, block_type=block_type, path=path)
+    response = (f"Блок `{problem_block.id}` "
+                + (f"({problem_block.block_type.description()}) " if problem_block.block_type else "")
+                + f"создан!\nЗадачи:\n")
+    for problem in problem_block.problems:
+        response += f"- `{problem.id}` _{problem.name}_\n"
+    bot.send_message(message.chat.id, response)
+
 
 # @bot.message_handler(func=lambda message: True)
 # def echo_all(message: Message):

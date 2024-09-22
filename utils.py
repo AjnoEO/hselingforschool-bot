@@ -1,4 +1,8 @@
 import sqlite3
+from telebot.types import Message, Document
+from telebot import TeleBot
+from data import TOKEN
+import requests
 from functools import wraps
 from db import DATABASE
 
@@ -15,6 +19,34 @@ def decline(numeral: int, stem: str, endings: tuple[str]):
     if numeral % 10 <= 4:
         return stem + endings[1]
     return stem + endings[2]
+
+
+def get_arg(message: Message, no_arg_error: str):
+    command_arg = message.text.split(maxsplit=1)
+    if len(command_arg) == 1:
+        raise UserError(no_arg_error)
+    return command_arg[1]
+
+
+def get_n_args(message: Message, min: int, max: int, no_arg_error: str):
+    command_arg = message.text.split(maxsplit=max)
+    if len(command_arg) < min:
+        raise UserError(no_arg_error)
+    return command_arg[1:]
+
+
+def get_file(message: Message, bot: TeleBot, no_file_error: str, expected_type: str | None = None):
+    """
+    Получить файл от пользователя
+    """
+    if not message.document and not (message.reply_to_message and message.reply_to_message.document):
+        raise UserError(no_file_error)
+    document: Document = message.document or message.reply_to_message.document
+    if expected_type and not document.file_name.endswith(expected_type):
+        raise UserError(f"Файл должен иметь расширение `{expected_type}`")
+    file_path = bot.get_file(document.file_id).file_path
+    return requests.get(f"https://api.telegram.org/file/bot{TOKEN}/{file_path}").content
+
 
 def provide_cursor(func):
     """

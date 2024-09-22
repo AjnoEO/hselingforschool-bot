@@ -87,7 +87,7 @@ class ProblemBlock:
             raise ValueError("В блоке должно быть три задачи")
         self.__id: int = id
         self.__olymp_id: int = olymp_id
-        if isinstance(problems[0], int):
+        if not isinstance(problems[0], Problem):
             problems = [Problem.from_id(pr_id) for pr_id in problems]
         self.__problems: list[Problem] = problems
         self.__block_type: BlockType | None = block_type
@@ -145,7 +145,7 @@ class ProblemBlock:
             if fetch is not None:
                 block_id = fetch[0]
                 raise UserError(f"Блок типа {block_type} уже есть: {block_id}")
-        if isinstance(problems[0], Problem):
+        if not isinstance(problems[0], int):
             problems = [pr.id for pr in problems]
         values = [olymp_id, block_type, path] + problems
         cursor.execute("INSERT INTO problem_blocks(olymp_id, block_type, path, first_problem, second_problem, third_problem)"
@@ -161,6 +161,8 @@ class ProblemBlock:
     def id(self): return self.__id
     @property
     def olymp_id(self): return self.__olymp_id
+    @property
+    def problems(self): return self.__problems
     @property
     def block_type(self): return self.__block_type
     @block_type.setter

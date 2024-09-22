@@ -1,6 +1,9 @@
 # База данных
 olymp.db
 
+# Рабочие файлы
+downloaded_files
+
 # Конфиденциальная инфа
 config.ini
 private.txt
