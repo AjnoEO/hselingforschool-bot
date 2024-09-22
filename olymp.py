@@ -1,5 +1,4 @@
-from datetime import datetime
-from enums import OlympStatus
+from enums import OlympStatus, QueueStatus
 import sqlite3
 from db import DATABASE
 from users import Participant, Examiner
@@ -61,6 +60,16 @@ class Olymp:
         if len(fetch) == 0:
             return None
         return Olymp(*fetch[0])
+    
+
+    def unhandled_queue_left(self) -> bool:
+        with sqlite3.connect(DATABASE) as conn:
+            cur = conn.cursor()
+            q = (f"SELECT EXISTS(SELECT 1 FROM queue WHERE olymp_id = ?"
+                 f"AND status NOT IN ({','.join(map(str, QueueStatus.active(as_numbers=True)))}))")
+            cur.execute(q, (self.id,))
+            result = cur.fetchone()
+            return bool(result[0])
 
 
     def __set(self, column: str, value):

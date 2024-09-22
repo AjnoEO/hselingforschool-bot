@@ -31,8 +31,8 @@ class MyExceptionHandler(telebot.ExceptionHandler):
             filename = os.path.split(traceback.tb_frame.f_code.co_filename)[1]
             line_number = traceback.tb_lineno
             error_message = (f"Во время выполнения операции произошла ошибка:\n"
-                             f"{exc.__class__.__name__} "
-                             f"({filename}, строка {line_number}): {exc}")
+                             f"`{exc.__class__.__name__} "
+                             f"({filename}, строка {line_number}): {exc}`")
         error_message += f"\nЕсли тебе кажется, что это баг, сообщи {OWNER_HANDLE}"
         bot.send_message(message.chat.id, error_message)
         return handled
@@ -105,6 +105,52 @@ def olymp_reg_start(message: Message):
         return
     current_olymp.status = OlympStatus.REGISTRATION
     bot.send_message(message.chat.id, f"Регистрация на олимпиаду _{current_olymp.name}_ запущена")
+
+
+@bot.message_handler(commands=['olymp_finish'], owner_only = True)
+def olymp_finish(message: Message):
+    print('olymp_finish')
+    if not current_olymp:
+        bot.send_message(message.chat.id, "Нет текущей олимпиады")
+        return
+    if current_olymp.status == OlympStatus.RESULTS:
+        bot.send_message(message.chat.id, "Олимпиада уже завершена")
+        return
+    if current_olymp.status == OlympStatus.QUEUE:
+        bot.send_message(message.chat.id, "Олимпиада уже завершается, происходит работа с очередью")
+        return
+    if current_olymp.status != OlympStatus.CONTEST:
+        bot.send_message(message.chat.id, "Олимпиада ещё не начата")
+        return
+    
+    participants = current_olymp.get_participants()
+    examiners = current_olymp.get_examiners()
+    p_not_in_queue_message = ("Олимпиада завершилась! Больше записываться в очередь нельзя. "
+                              "Можешь отправляться на заслуженный отдых")
+    p_in_queue_message = ("Олимпиада завершилась! Больше записываться в очередь нельзя, "
+                          "но тех, кто уже записался, мы проверим, так что не уходи")
+    if current_olymp.unhandled_queue_left():
+        current_olymp.status = OlympStatus.QUEUE
+        bot.send_message(message.chat.id, "Олимпиада завершена. Идёт работа с очередью")
+        e_message = ("Олимпиада завершилась! Но мы ещё работаем с очередью, так что "
+                     "не уходи раньше времени. Если ты завершил проверку и к тебе никто "
+                     "не идёт — тогда можешь идти отдыхать")
+        for p in participants:
+            if p.tg_id:
+                bot.send_message(p.tg_id, p_in_queue_message if p.queue_entry else p_not_in_queue_message)
+        for e in examiners:
+            if e.tg_id:
+                bot.send_message(e.tg_id, e_message)
+    else:
+        current_olymp.status = OlympStatus.RESULTS
+        bot.send_message(message.chat.id, "Олимпиада завершена. Очередь полностью обработана")
+        e_message = "Олимпиада завершилась! Очередь пуста, так что можешь идти отдыхать"
+        for p in participants:
+            if p.tg_id:
+                bot.send_message(p.tg_id, p_not_in_queue_message)
+        for e in examiners:
+            if e.tg_id:
+                bot.send_message(e.tg_id, e_message)
 
 
 @bot.message_handler(commands=['olymp_start'], owner_only = True)
