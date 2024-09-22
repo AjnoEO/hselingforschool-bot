@@ -29,6 +29,7 @@ class User:
         surname: str,
         *,
         tg_id: int | None = None,
+        ok_if_exists: bool = False,
         cursor: sqlite3.Cursor | None = None,
     ):
         """
@@ -36,17 +37,18 @@ class User:
         """
         tg_handle = tg_handle.lower()
         exists = value_exists("users", {"tg_handle": tg_handle})
-        if exists:
+        if exists and not ok_if_exists:
             raise ValueError(f"Пользователь @{tg_handle} уже есть в базе")
         if tg_id:
-            exists = value_exists("users", {"tg_id": tg_id})
-            if exists:
+            exists = exists or value_exists("users", {"tg_id": tg_id})
+            if exists and not ok_if_exists:
                 raise ValueError(f"Пользователь с Telegram ID {tg_id} уже есть в базе")
-        cursor.execute(
-            "INSERT INTO users(tg_id, tg_handle, name, surname) VALUES (?, ?, ?, ?)", 
-            (tg_id, tg_handle, name, surname)
-        )
-        cursor.connection.commit()
+        if not exists:
+            cursor.execute(
+                "INSERT INTO users(tg_id, tg_handle, name, surname) VALUES (?, ?, ?, ?)", 
+                (tg_id, tg_handle, name, surname)
+            )
+            cursor.connection.commit()
         return cls.from_tg_handle(tg_handle)
 
     @classmethod
@@ -314,12 +316,13 @@ class Participant(OlympMember):
         olymp_id: int,
         *,
         tg_id: int | None = None,
+        ok_if_user_exists: bool = False,
         cursor: sqlite3.Cursor | None = None,
     ):
         """
         Добавить пользователя в таблицу users и добавить его как участника в таблицу participants
         """
-        user = User.create(tg_handle, name, surname, tg_id=tg_id, cursor=cursor)
+        user = User.create(tg_handle, name, surname, tg_id=tg_id, ok_if_exists=ok_if_user_exists, cursor=cursor)
         return Participant.create_for_existing_user(user, grade, olymp_id, cursor=cursor)
     
     @classmethod
@@ -410,9 +413,9 @@ class Examiner(OlympMember):
         cls,
         user: User | int,
         conference_link: str,
-        problems: list[int],
         olymp_id: int,
         *,
+        problems: list[int] | None = None,
         busyness_level: int = 0,
         is_busy: bool = True,
         cursor: sqlite3.Cursor | None = None,
@@ -432,11 +435,12 @@ class Examiner(OlympMember):
             (user_id, olymp_id, conference_link, busyness_level, int(is_busy))
         )
         examiner_id = cursor.lastrowid
-        q = "INSERT INTO examiner_problems(examiner_id, problem_id) VALUES " + ", ".join(["(?, ?)"] * len(problems))
-        p = []
-        for problem_id in problems:
-            p += [examiner_id, problem_id]
-        cursor.execute(q, tuple(p))
+        if problems and len(problems) > 0:
+            q = "INSERT INTO examiner_problems(examiner_id, problem_id) VALUES " + ", ".join(["(?, ?)"] * len(problems))
+            p = []
+            for problem_id in problems:
+                p += [examiner_id, problem_id]
+            cursor.execute(q, tuple(p))
         cursor.connection.commit()
         return Examiner.from_user_id(user_id, olymp_id)
 
@@ -448,20 +452,21 @@ class Examiner(OlympMember):
         name: str,
         surname: str,
         conference_link: str,
-        problems: list[int],
         olymp_id: int,
         *,
         tg_id: int | None = None,
+        problems: list[int] | None = None,
         busyness_level: int = 0,
         is_busy: bool = True,
+        ok_if_user_exists: bool = False,
         cursor: sqlite3.Cursor | None = None,
     ):
         """
         Добавить пользователя в таблицу users и добавить его как принимающего в таблицу examiners
         """
-        user = User.create(tg_handle, name, surname, tg_id=tg_id, cursor=cursor)
+        user = User.create(tg_handle, name, surname, tg_id=tg_id, ok_if_exists=ok_if_user_exists, cursor=cursor)
         return Examiner.create_for_existing_user(
-            user, conference_link, problems, olymp_id, 
+            user, conference_link, olymp_id, problems=problems,
             busyness_level=busyness_level, is_busy=is_busy, cursor=cursor
         )
     

@@ -1,12 +1,13 @@
 import os
-import telebot.formatting
 from data import TOKEN, OWNER_ID, OWNER_HANDLE
 import telebot
 from telebot.types import Message
 from telebot.custom_filters import SimpleCustomFilter
 from olymp import Olymp, OlympStatus
-from users import Participant, Examiner
-from utils import UserError
+from users import OlympMember, Participant, Examiner
+from utils import UserError, decline
+import requests
+import pandas as pd
 
 
 class MyExceptionHandler(telebot.ExceptionHandler):
@@ -109,7 +110,6 @@ def olymp_reg_start(message: Message):
 
 @bot.message_handler(commands=['olymp_finish'], owner_only = True)
 def olymp_finish(message: Message):
-    print('olymp_finish')
     if not current_olymp:
         bot.send_message(message.chat.id, "Нет текущей олимпиады")
         return
@@ -131,7 +131,6 @@ def olymp_finish(message: Message):
                           "но тех, кто уже записался, мы проверим, так что не уходи")
     if current_olymp.unhandled_queue_left():
         current_olymp.status = OlympStatus.QUEUE
-        bot.send_message(message.chat.id, "Олимпиада завершена. Идёт работа с очередью")
         e_message = ("Олимпиада завершилась! Но мы ещё работаем с очередью, так что "
                      "не уходи раньше времени. Если ты завершил проверку и к тебе никто "
                      "не идёт — тогда можешь идти отдыхать")
@@ -141,9 +140,9 @@ def olymp_finish(message: Message):
         for e in examiners:
             if e.tg_id:
                 bot.send_message(e.tg_id, e_message)
+        bot.send_message(message.chat.id, "Олимпиада завершена. Идёт работа с очередью")
     else:
         current_olymp.status = OlympStatus.RESULTS
-        bot.send_message(message.chat.id, "Олимпиада завершена. Очередь полностью обработана")
         e_message = "Олимпиада завершилась! Очередь пуста, так что можешь идти отдыхать"
         for p in participants:
             if p.tg_id:
@@ -151,6 +150,7 @@ def olymp_finish(message: Message):
         for e in examiners:
             if e.tg_id:
                 bot.send_message(e.tg_id, e_message)
+        bot.send_message(message.chat.id, "Олимпиада завершена. Очередь полностью обработана")
 
 
 @bot.message_handler(commands=['olymp_start'], owner_only = True)
@@ -192,6 +192,42 @@ def olymp_create(message: Message):
     name = command_arg[1]
     current_olymp = Olymp.create(name)
     bot.send_message(message.chat.id, f"Олимпиада _{current_olymp.name}_ успешно создана")
+
+
+def upload_members(message: Message, required_columns: list[str], member_class: type[OlympMember],
+                   term_stem: str, term_endings: tuple[str]):
+    if not current_olymp:
+        bot.send_message(message.chat.id, "Нет текущей олимпиады")
+        return
+    if current_olymp.status != OlympStatus.TBA:
+        bot.send_message(message.chat.id, "Регистрация на олимпиаду или олимпиада уже начата")
+        return
+    if not message.document and not (message.reply_to_message and message.reply_to_message.document):
+        bot.send_message(message.chat.id, "Необходимо указать Excel-таблицу")
+        return
+    document: telebot.types.Document = message.document or message.reply_to_message.document
+    file_path = bot.get_file(document.file_id).file_path
+    file_data = requests.get(f"https://api.telegram.org/file/bot{TOKEN}/{file_path}").content
+    member_table = pd.read_excel(file_data)
+    if set(member_table.columns) != set(required_columns):
+        bot.send_message(message.chat.id, "Таблица должна содержать столбцы " + ', '.join([f'`{col}`' for col in required_columns]))
+        return
+    for i, m in member_table.iterrows():
+        member_class.create_as_new_user(**m, olymp_id=current_olymp.id, ok_if_user_exists=True)
+    amount = member_table.shape[0]
+    response = (f"{amount} {decline(amount, term_stem, term_endings)} успешно "
+                f"{decline(amount, 'добавлен', ('', 'ы', 'ы'))} в олимпиаду _{current_olymp.name}_")
+    bot.send_message(message.chat.id, response)
+
+
+@bot.message_handler(commands=['upload_participants'], owner_only=True)
+def upload_participants(message: Message):
+    upload_members(message, ["name", "surname", "tg_handle", "grade"], Participant, 'участник', ('', 'а', 'ов'))
+
+
+@bot.message_handler(commands=['upload_examiners'], owner_only=True)
+def upload_examiners(message: Message):
+    upload_members(message, ["name", "surname", "tg_handle", "conference_link"], Examiner, 'принимающ', ('ий', 'их', 'их'))
 
 
 @bot.message_handler(commands=['olymp_info'], owner_only=True)

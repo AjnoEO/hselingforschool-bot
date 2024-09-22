@@ -5,6 +5,17 @@ from db import DATABASE
 class UserError(Exception):
     """Ошибки, вызванные неправильными действиями пользователей"""
 
+def decline(numeral: int, stem: str, endings: tuple[str]):
+    if (numeral // 10) % 10 == 1:
+        return stem + endings[2]
+    if numeral % 10 == 1:
+        return stem + endings[0]
+    if numeral % 10 == 0:
+        return stem + endings[2]
+    if numeral % 10 <= 4:
+        return stem + endings[1]
+    return stem + endings[2]
+
 def provide_cursor(func):
     """
     Даёт возможность не указывать курсор SQLite при вызове функции 
