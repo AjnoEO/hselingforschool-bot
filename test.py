@@ -17,19 +17,21 @@ if os.path.exists(DATABASE):
     os.remove(DATABASE)
 create_tables("db.sql")
 
-Olymp.create("тестище", OlympStatus.RESULTS)
+olymp_test = Olymp.create("тестище", OlympStatus.TBA)
+olymp_test.status = OlympStatus.RESULTS
 olymp2007: Olymp = Olymp.create("верните мне мой 2007")
 ajno: User = User.create("ajnoeo", "Тёма", "Бойко")
-ajno_p: Participant = Participant.create_for_existing_user(ajno, 12, olymp2007.id)
+bejno_p: Participant = Participant.create_as_new_user("bjnoeo", "Света", "Бойко", 12, olymp2007.id)
 ajno_e: Examiner = Examiner.create_for_existing_user(ajno, "aboba.ru", [1,3,6], olymp2007.id, is_busy=False)
-p: Participant = Participant.create_as_new_user("lifelong_participant", "Участник", "Вечный", 1, olymp2007.id, tg_id=12345)
+p: Participant = Participant.create_as_new_user("lifelong_participant", "Участник", "Вечный", 1, olymp2007.id)
 e: Examiner = Examiner.create_as_new_user("lifelong_examiner", "Принимающий", "Бесконечно", "lifelong.ex", [4], olymp2007.id)
-ajno_p.name = "Артём"
+bejno_p.name = "Бртём"
 ajno_e.is_busy = True
 p.grade = 2
 e.busyness_level += 1
 print(Participant.from_id(2).name)
 print(Examiner.from_id(2).surname)
+print(ajno_e.queue_entry)
 problem_1: Problem = Problem.create(olymp2007.id, "minors")
 Problem.create(olymp2007.id, "majors")
 problem_2 = Problem.from_id(2)

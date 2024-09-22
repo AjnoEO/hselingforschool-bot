@@ -78,14 +78,14 @@ class Olymp:
     def status(self): return self.__status
     @status.setter
     def status(self, status: OlympStatus):
-        self.__set('name', status.value)
+        self.__set('status', status.value)
         self.__status = status
 
     @provide_cursor
     def get_participants(self, *, cursor: sqlite3.Cursor | None = None) -> list[Participant]:
         cursor.execute("SELECT user_id FROM participants WHERE olymp_id = ?", (self.id,))
         results = cursor.fetchall()
-        return [Participant.from_user_id(user_id) for user_id in results]
+        return [Participant.from_user_id(user_id_tuple[0], self.id) for user_id_tuple in results]
     
     @provide_cursor
     def get_examiners(self, *, only_free: bool = False, order_by_busyness: bool = False, cursor: sqlite3.Cursor | None = None) -> list[Participant]:
@@ -96,4 +96,4 @@ class Olymp:
             q += " ORDER BY busyness_level ASC"
         cursor.execute(q, (self.id,))
         results = cursor.fetchall()
-        return [Examiner.from_user_id(user_id) for user_id in results]
+        return [Examiner.from_user_id(user_id_tuple[0], self.id) for user_id_tuple in results]

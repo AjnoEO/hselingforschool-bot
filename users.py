@@ -2,6 +2,7 @@ import sqlite3
 from db import DATABASE
 from utils import UserError, provide_cursor, value_exists, update_in_table
 from queue_entry import QueueEntry, QueueStatus
+from data import OWNER_HANDLE
 
 
 class User:
@@ -242,19 +243,16 @@ class OlympMember(User):
             user_id, olymp_id = fetch
             return cls.from_user_id(user_id, olymp_id)
 
-    @property
-    def queue_entry(self, id_column: str, *, error_if_none: str | None = None):
+    def _queue_entry(self, id_column: str):
         with sqlite3.connect(DATABASE) as conn:
             cur = conn.cursor()
             q = (f"SELECT * FROM queue WHERE {id_column} = ?"
-                 f"AND status IN ({', '.join(QueueStatus.active(as_numbers=True))})")
+                 f"AND status IN ({', '.join(map(str, QueueStatus.active(as_numbers=True)))})")
             cur.execute(q, (self.__id,))
             fetch = cur.fetchone()
         if fetch is not None:
             return QueueEntry(*fetch)
-        if fetch is None and not error_if_none:
-            return None
-        raise UserError(error_if_none)
+        return None
 
     @property
     def olymp_id(self):
@@ -357,9 +355,12 @@ class Participant(OlympMember):
             return super().from_id(id, "participants", error_user_not_found=None)
         return super().from_id(id, "participants", error_user_not_found="Участник не найден")
 
+    def display_data(self):
+        return f"{self.name} {self.surname}, {self.grade} класс\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLE}"
+
     @property
-    def queue_entry(self, *, error_if_none: str | None = None):
-        return super().queue_entry(self, "participant_id", error_if_none=error_if_none)
+    def queue_entry(self):
+        return self._queue_entry("participant_id")
 
     def __set(self, column: str, value):
         update_in_table("participants", column, value, "id", self.__id)
@@ -504,9 +505,12 @@ class Examiner(OlympMember):
             return super().from_id(id, "examiners", error_user_not_found=None)
         return super().from_id(id, "examiners", error_user_not_found="Принимающий не найден")
 
+    def display_data(self):
+        return f"{self.name} {self.surname}, ссылка: {self.conference_link}\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLE}"
+    
     @property
-    def queue_entry(self, *, error_if_none: str | None = None):
-        return super().queue_entry(self, "examiner_id", error_if_none=error_if_none)
+    def queue_entry(self):
+        return self._queue_entry("examiner_id")
     
     def __set(self, column: str, value):
         update_in_table("examiners", column, value, "id", self.__id)
