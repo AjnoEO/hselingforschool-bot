@@ -176,6 +176,24 @@ def olymp_start(message: Message):
     bot.send_message(message.chat.id, f"Олимпиада _{current_olymp.name}_ начата")
 
 
+@bot.message_handler(commands=['olymp_create'], owner_only=True)
+def olymp_create(message: Message):
+    global current_olymp
+    if current_olymp and current_olymp.status != OlympStatus.RESULTS:
+        bot.send_message(
+            message.chat.id,
+            f"Уже имеется незавершённая олимпиада _{current_olymp.name}_. Заверши её, чтобы создать новую"
+        )
+        return
+    command_arg = message.text.split(maxsplit=1)
+    if len(command_arg) == 1:
+        bot.send_message(message.chat.id, "Для олимпиады необходимо название")
+        return
+    name = command_arg[1]
+    current_olymp = Olymp.create(name)
+    bot.send_message(message.chat.id, f"Олимпиада _{current_olymp.name}_ успешно создана")
+
+
 @bot.message_handler(commands=['olymp_info'], owner_only=True)
 def olymp_info(message: Message):
     if not current_olymp:
