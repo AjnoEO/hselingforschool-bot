@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS `queue` (
 	`olymp_id` INTEGER NOT NULL,
 	`participant_id` INTEGER NOT NULL,
 	`problem_id` INTEGER NOT NULL,
-	`status` integer NOT NULL,
+	`status` integer NOT NULL DEFAULT 0,
 	`examiner_id` INTEGER,
 	CHECK (`status` IN (0, 1) OR `examiner_id` IS NOT NULL),
 	FOREIGN KEY(`olymp_id`) REFERENCES `olymps`(`id`),
