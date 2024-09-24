@@ -4,10 +4,10 @@ import re
 from db import create_update_db
 from data import TOKEN, OWNER_ID, OWNER_HANDLE
 import telebot
-from telebot.types import Message
+from telebot.types import Message, CallbackQuery
 from telebot.custom_filters import AdvancedCustomFilter
 from olymp import Olymp, OlympStatus
-from users import OlympMember, Participant, Examiner
+from users import User, OlympMember, Participant, Examiner
 from problem import Problem, ProblemBlock, BlockType
 from utils import UserError, decline, get_arg, get_n_args, get_file
 import pandas as pd
@@ -64,10 +64,6 @@ bot.add_custom_filter(RolesFilter())
 current_olymp = Olymp.current()
 
 
-@bot.message_handler(commands=['raise_error'])
-def raise_error(message: Message):
-    raise UserError("Пользователь лох")
-
 @bot.message_handler(commands=['start', 'authenticate'])
 def send_welcome(message: Message):
     if not current_olymp or current_olymp.status == OlympStatus.TBA:
@@ -90,10 +86,21 @@ def send_welcome(message: Message):
                     + "!\n" + member.display_data())
         bot.send_message(message.chat.id, response)
         return
-    
     tg_handle = message.from_user.username
     new_member: Participant | Examiner | None = \
         Participant.from_tg_handle(tg_handle, olymp_id, no_error=True) or Examiner.from_tg_handle(tg_handle, olymp_id, no_error=True)
+    user_old_handle = User.from_tg_id(tg_id, no_error=True)
+    if user_old_handle and new_member:
+        bot.send_message(
+            message.chat.id, 
+            f"У тебя поменялся хэндл в Телеграме с @{user_old_handle.tg_handle} на @{new_member.tg_handle}?",
+            reply_markup=telebot.util.quick_markup(
+                {'Да': {'callback_data': 'handle_changed_yes'}, 'Нет': {'callback_data': 'handle_changed_no'}},
+                row_width=2
+            )
+        )
+        return
+    
     if new_member:
         new_member.tg_id = tg_id
         response = ("Ты успешно авторизовался как "
@@ -103,6 +110,29 @@ def send_welcome(message: Message):
         return
     
     bot.send_message(message.chat.id, f"Пользователь не найден. Если вы регистрировались на олимпиаду, напишите {OWNER_HANDLE}")
+
+
+@bot.callback_query_handler(lambda callback_query: callback_query.data.startswith('handle_changed_'))
+def callback_query_handler(callback_query: CallbackQuery):
+    handle_changed = (callback_query.data.endswith('_yes'))
+    message = callback_query.message
+    bot.edit_message_reply_markup(chat_id=message.chat.id, message_id=message.id, reply_markup=None)
+    if not handle_changed:
+        bot.send_message(message.chat.id, f"Что-то пошло не так. Напиши {OWNER_HANDLE}")
+    else:
+        old_user = User.from_tg_id(message.chat.id)
+        new_user = User.from_tg_handle(message.chat.username)
+        old_user.conflate_with(new_user)
+        user_id = old_user.user_id
+        olymp_id = current_olymp.id
+        member: Participant | Examiner | None = \
+            Participant.from_user_id(user_id, olymp_id, no_error=True) or Examiner.from_user_id(user_id, olymp_id, no_error=True)
+        if member:
+            response = ("Ты успешно авторизовался как "
+                        + ("участник" if isinstance(member, Participant) else "принимающий")
+                        + "!\n" + member.display_data())
+            bot.send_message(message.chat.id, response)
+            return
 
 
 @bot.message_handler(commands=['olymp_registration_start', 'olymp_reg_start'], roles=['owner'])
@@ -115,6 +145,26 @@ def olymp_reg_start(message: Message):
         raise UserError("Олимпиада уже идёт или завершилась")
     current_olymp.status = OlympStatus.REGISTRATION
     bot.send_message(message.chat.id, f"Регистрация на олимпиаду _{current_olymp.name}_ запущена")
+
+
+@bot.message_handler(commands=['olymp_start'], roles=['owner'])
+def olymp_start(message: Message):
+    if not current_olymp:
+        raise UserError("Нет текущей олимпиады")
+    if current_olymp.status == OlympStatus.TBA:
+        raise UserError("Сначала необходимо запустить регистрацию")
+    if current_olymp.status != OlympStatus.REGISTRATION:
+        raise UserError("Олимпиада уже идёт или завершилась")
+    current_olymp.status = OlympStatus.CONTEST
+    participants = current_olymp.get_participants()
+    for p in participants:
+        if p.tg_id:
+            bot.send_message(p.tg_id, "Олимпиада началась! Можешь приступать к решению задач")
+    examiners = current_olymp.get_examiners()
+    for e in examiners:
+        if e.tg_id:
+            bot.send_message(e.tg_id, "Олимпиада началась! Напиши /free и ожидай участников")
+    bot.send_message(message.chat.id, f"Олимпиада _{current_olymp.name}_ начата")
 
 
 @bot.message_handler(commands=['olymp_finish'], roles=['owner'])
@@ -156,26 +206,6 @@ def olymp_finish(message: Message):
             if e.tg_id:
                 bot.send_message(e.tg_id, e_message)
         bot.send_message(message.chat.id, "Олимпиада завершена. Очередь полностью обработана")
-
-
-@bot.message_handler(commands=['olymp_start'], roles=['owner'])
-def olymp_start(message: Message):
-    if not current_olymp:
-        raise UserError("Нет текущей олимпиады")
-    if current_olymp.status == OlympStatus.TBA:
-        raise UserError("Сначала необходимо запустить регистрацию")
-    if current_olymp.status != OlympStatus.REGISTRATION:
-        raise UserError("Олимпиада уже идёт или завершилась")
-    current_olymp.status = OlympStatus.CONTEST
-    participants = current_olymp.get_participants()
-    for p in participants:
-        if p.tg_id:
-            bot.send_message(p.tg_id, "Олимпиада началась! Можешь приступать к решению задач")
-    examiners = current_olymp.get_examiners()
-    for e in examiners:
-        if e.tg_id:
-            bot.send_message(e.tg_id, "Олимпиада началась! Напиши /free и ожидай участников")
-    bot.send_message(message.chat.id, f"Олимпиада _{current_olymp.name}_ начата")
 
 
 @bot.message_handler(commands=['olymp_create'], roles=['owner'])

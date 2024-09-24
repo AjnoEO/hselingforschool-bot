@@ -61,6 +61,7 @@ def provide_cursor(func):
         with sqlite3.connect(DATABASE) as conn:
             cursor = conn.cursor()
             result = func(*args, **kwargs, cursor=cursor)
+            conn.commit()
         return result
     return wrapper
 

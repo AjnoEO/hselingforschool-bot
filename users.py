@@ -2,6 +2,7 @@ import sqlite3
 from db import DATABASE
 from utils import UserError, provide_cursor, value_exists, update_in_table
 from queue_entry import QueueEntry, QueueStatus
+from problem import ProblemBlock, BlockType
 from data import OWNER_HANDLE
 
 
@@ -103,17 +104,46 @@ class User:
         return user
 
     @classmethod
-    def from_user_id(cls, user_id: int):
+    def from_user_id(cls, user_id: int, no_error: bool = False):
+        if no_error:
+            return cls.from_db(user_id=user_id, error_user_not_found=None)
         return cls.from_db(user_id=user_id)
 
     @classmethod
-    def from_tg_id(cls, tg_id: int):
+    def from_tg_id(cls, tg_id: int, no_error: bool = False):
+        if no_error:
+            return cls.from_db(tg_id=tg_id, error_user_not_found=None)
         return cls.from_db(tg_id=tg_id)
     
     @classmethod
-    def from_tg_handle(cls, tg_handle: str):
+    def from_tg_handle(cls, tg_handle: str, no_error: bool = False):
+        if no_error:
+            return cls.from_db(tg_handle=tg_handle, error_user_not_found=None)
         return cls.from_db(tg_handle=tg_handle)
     
+
+    @provide_cursor
+    def remove(self, *, cursor: sqlite3.Cursor | None = None):
+        cursor.execute("DELETE FROM users WHERE user_id = ?", (self.user_id,))
+
+
+    def conflate_with(self, new_user: 'User'):
+        if not self.tg_id and new_user.tg_id:
+            self, new_user = new_user, self
+        new_name = new_user.name
+        new_surname = new_user.surname
+        new_tg_handle = new_user.tg_handle
+        with sqlite3.connect(DATABASE) as conn:
+            cur = conn.cursor()
+            cur.execute("UPDATE participants SET user_id = ? WHERE user_id = ?", (self.user_id, new_user.user_id))
+            cur.execute("UPDATE examiners SET user_id = ? WHERE user_id = ?", (self.user_id, new_user.user_id))
+            new_user.remove(cursor=cur)
+            conn.commit()
+        self.name = new_name
+        self.surname = new_surname
+        self.tg_handle = new_tg_handle
+
+
     def __set(self, column: str, value):
         update_in_table("users", column, value, "user_id", self.__user_id)
 
@@ -271,11 +301,13 @@ class Participant(OlympMember):
         name: str,
         surname: str,
         grade: int,
+        last_block_number: int,
         id: int
     ):
-        super().__init__(olymp_id, user_id, tg_id, tg_handle, name, surname, id=id, grade=grade)
+        super().__init__(olymp_id, user_id, tg_id, tg_handle, name, surname, id=id, grade=grade, last_block_number=last_block_number)
         self.__id: int = id
         self.__grade: int = grade
+        self.__last_block_number: int = last_block_number
 
     
     @classmethod
@@ -284,8 +316,9 @@ class Participant(OlympMember):
         cls,
         user: User | int,
         grade: int,
-        olymp_id: int,
+        olymp_id: int,        
         *,
+        last_block_number: int | None = None,
         cursor: sqlite3.Cursor | None = None,
     ):
         """
@@ -298,10 +331,13 @@ class Participant(OlympMember):
         exists = value_exists("participants", {"user_id": user_id, "olymp_id": olymp_id})
         if exists:
             raise ValueError(f"Пользователь {user_id} уже участник олимпиады {olymp_id}")
-        cursor.execute(
-            "INSERT INTO participants(user_id, olymp_id, grade) VALUES (?, ?, ?)", 
-            (user_id, olymp_id, grade)
-        )
+        q = (f"INSERT INTO participants(user_id, olymp_id, grade"
+             f"{(', last_block_number' if last_block_number else '')}) VALUES "
+             f"(?, ?, ?{', ?' if last_block_number else ''})")
+        p = [user_id, olymp_id, grade]
+        if last_block_number:
+            p.append(last_block_number)
+        cursor.execute(q, tuple(p))
         cursor.connection.commit()
         return Participant.from_user_id(user_id, olymp_id)
 
@@ -316,6 +352,7 @@ class Participant(OlympMember):
         olymp_id: int,
         *,
         tg_id: int | None = None,
+        last_block_number: int | None = None,
         ok_if_user_exists: bool = False,
         cursor: sqlite3.Cursor | None = None,
     ):
@@ -323,7 +360,7 @@ class Participant(OlympMember):
         Добавить пользователя в таблицу users и добавить его как участника в таблицу participants
         """
         user = User.create(tg_handle, name, surname, tg_id=tg_id, ok_if_exists=ok_if_user_exists, cursor=cursor)
-        return Participant.create_for_existing_user(user, grade, olymp_id, cursor=cursor)
+        return Participant.create_for_existing_user(user, grade, olymp_id, last_block_number=last_block_number, cursor=cursor)
     
     @classmethod
     def from_db(
@@ -339,7 +376,7 @@ class Participant(OlympMember):
         participant = super().from_db(
             olymp_id,
             "participants", 
-            ["id", "grade"], 
+            ["id", "grade", "last_block_number"], 
             user_id = user_id, 
             tg_id = tg_id,
             tg_handle = tg_handle,
@@ -350,6 +387,7 @@ class Participant(OlympMember):
             return None
         participant.__id = participant._additional_values["id"]
         participant.__grade = participant._additional_values["grade"]
+        participant.__last_block_number = participant._additional_values["last_block_number"]
         return participant
 
     @classmethod
@@ -376,6 +414,20 @@ class Participant(OlympMember):
     def grade(self, value: int):
         self.__set('grade', value)
         self.__grade = value
+    @property
+    def last_block_number(self): return self.__last_block_number
+    @last_block_number.setter
+    def last_block_number(self, value: int):
+        self.__set('last_block_number', value)
+        self.__last_block_number = value
+    @property
+    def is_junior(self): return (self.grade < 10)
+    @property
+    def is_senior(self): return not self.is_junior
+    @property
+    def last_block(self):
+        block_type = BlockType[('JUNIOR' if self.is_junior else 'SENIOR') + '_' + str(self.last_block_number)]
+        return ProblemBlock.from_block_type(self.olymp_id, block_type)
 
 
 class Examiner(OlympMember):

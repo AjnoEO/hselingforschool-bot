@@ -47,6 +47,8 @@ def create_update_db():
                 con.commit()
     with open(DB_VERSION_FILE, "w") as f:
         f.write(str(DB_VERSION))
-    set_enum(OlympStatus, "olymp_status", cursor=cur)
-    set_enum(QueueStatus, "queue_status", cursor=cur)
-    set_enum(BlockType, "block_types", cursor=cur)
+    with sqlite3.connect(DATABASE) as con:
+        cur = con.cursor()
+        set_enum(OlympStatus, "olymp_status", cursor=cur)
+        set_enum(QueueStatus, "queue_status", cursor=cur)
+        set_enum(BlockType, "block_types", cursor=cur)
