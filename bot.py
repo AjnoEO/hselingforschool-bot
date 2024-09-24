@@ -4,7 +4,7 @@ import re
 from data import TOKEN, OWNER_ID, OWNER_HANDLE
 import telebot
 from telebot.types import Message
-from telebot.custom_filters import SimpleCustomFilter
+from telebot.custom_filters import AdvancedCustomFilter
 from olymp import Olymp, OlympStatus
 from users import OlympMember, Participant, Examiner
 from problem import Problem, ProblemBlock, BlockType
@@ -26,14 +26,14 @@ class MyExceptionHandler(telebot.ExceptionHandler):
             return False
         handled = False
         if isinstance(exc, UserError):
-            error_message = "Ошибка!\n" + str(exc)
+            error_message = "⚠️ Ошибка!\n" + str(exc)
             handled = True
         else:
             traceback = exc.__traceback__
             while traceback.tb_next: traceback = traceback.tb_next
             filename = os.path.split(traceback.tb_frame.f_code.co_filename)[1]
             line_number = traceback.tb_lineno
-            error_message = (f"Во время выполнения операции произошла ошибка:\n"
+            error_message = (f"⚠️ Во время выполнения операции произошла ошибка:\n"
                              f"`{exc.__class__.__name__} "
                              f"({filename}, строка {line_number}): {exc}`")
         error_message += f"\nЕсли тебе кажется, что это баг, сообщи {OWNER_HANDLE}"
@@ -43,12 +43,19 @@ class MyExceptionHandler(telebot.ExceptionHandler):
 
 bot = telebot.TeleBot(TOKEN, parse_mode="markdown", disable_web_page_preview=True, exception_handler=MyExceptionHandler())
 
-class OwnerOnly(SimpleCustomFilter):
-    key = 'owner_only'
+class RolesFilter(AdvancedCustomFilter): # owner, examiner, participant
+    key = 'roles'
     @staticmethod
-    def check(message: Message):
-        return message.from_user.id == OWNER_ID
-bot.add_custom_filter(OwnerOnly())
+    def check(message: Message, roles: list[str]):
+        if 'owner' in roles and message.from_user.id == OWNER_ID:
+            return True
+        if 'examiner' in roles and Examiner.from_tg_id(message.from_user.id, current_olymp.id, no_error=True):
+            return True
+        if 'participant' in roles and Participant.from_tg_id(message.from_user.id, current_olymp.id, no_error=True):
+            return True
+        return False
+
+bot.add_custom_filter(RolesFilter())
 
 current_olymp = Olymp.current()
 
@@ -94,7 +101,7 @@ def send_welcome(message: Message):
     bot.send_message(message.chat.id, f"Пользователь не найден. Если вы регистрировались на олимпиаду, напишите {OWNER_HANDLE}")
 
 
-@bot.message_handler(commands=['olymp_registration_start', 'olymp_reg_start'], owner_only = True)
+@bot.message_handler(commands=['olymp_registration_start', 'olymp_reg_start'], roles=['owner'])
 def olymp_reg_start(message: Message):
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
@@ -106,7 +113,7 @@ def olymp_reg_start(message: Message):
     bot.send_message(message.chat.id, f"Регистрация на олимпиаду _{current_olymp.name}_ запущена")
 
 
-@bot.message_handler(commands=['olymp_finish'], owner_only = True)
+@bot.message_handler(commands=['olymp_finish'], roles=['owner'])
 def olymp_finish(message: Message):
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
@@ -147,7 +154,7 @@ def olymp_finish(message: Message):
         bot.send_message(message.chat.id, "Олимпиада завершена. Очередь полностью обработана")
 
 
-@bot.message_handler(commands=['olymp_start'], owner_only = True)
+@bot.message_handler(commands=['olymp_start'], roles=['owner'])
 def olymp_start(message: Message):
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
@@ -167,7 +174,7 @@ def olymp_start(message: Message):
     bot.send_message(message.chat.id, f"Олимпиада _{current_olymp.name}_ начата")
 
 
-@bot.message_handler(commands=['olymp_create'], owner_only=True)
+@bot.message_handler(commands=['olymp_create'], roles=['owner'])
 def olymp_create(message: Message):
     global current_olymp
     if current_olymp and current_olymp.status != OlympStatus.RESULTS:
@@ -200,17 +207,17 @@ def upload_members(message: Message, required_columns: list[str], member_class: 
     bot.send_message(message.chat.id, response)
 
 
-@bot.message_handler(commands=['upload_participants'], owner_only=True)
+@bot.message_handler(commands=['upload_participants'], roles=['owner'])
 def upload_participants(message: Message):
     upload_members(message, ["name", "surname", "tg_handle", "grade"], Participant, 'участник', ('', 'а', 'ов'))
 
 
-@bot.message_handler(commands=['upload_examiners'], owner_only=True)
+@bot.message_handler(commands=['upload_examiners'], roles=['owner'])
 def upload_examiners(message: Message):
     upload_members(message, ["name", "surname", "tg_handle", "conference_link"], Examiner, 'принимающ', ('ий', 'их', 'их'))
 
 
-@bot.message_handler(commands=['olymp_info'], owner_only=True)
+@bot.message_handler(commands=['olymp_info'], roles=['owner'])
 def olymp_info(message: Message):
     if not current_olymp:
         response = f"Нет текущей олимпиады"
@@ -221,7 +228,7 @@ def olymp_info(message: Message):
     bot.send_message(message.chat.id, response)
 
 
-@bot.message_handler(commands=['problem_create'], owner_only=True)
+@bot.message_handler(commands=['problem_create'], roles=['owner'])
 def problem_create(message: Message):
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
@@ -230,7 +237,46 @@ def problem_create(message: Message):
     bot.send_message(message.chat.id, f"Задача _{problem.name}_ добавлена! ID: `{problem.id}`")
 
 
-@bot.message_handler(commands=['problem_block_create'], owner_only=True)
+@bot.message_handler(commands=['problem_list'], roles=['owner', 'examiner'])
+def problem_list(message: Message):
+    if not current_olymp:
+        raise UserError("Нет текущей олимпиады")
+    problems = current_olymp.get_problems()
+    if len(problems) == 0:
+        bot.send_message(message.chat.id, f"В олимпиаде _{current_olymp.name}_ ещё нет задач")
+        return
+    response = f"Задачи олимпиады _{current_olymp.name}_:\n"
+    for p in problems:
+        response += f"- `{p.id}` _{p.name}_\n"
+    bot.send_message(message.chat.id, response)
+
+
+@bot.message_handler(commands=['problem_info'], roles=['owner', 'examiner'])
+def problem_info(message: Message):
+    if not current_olymp:
+        raise UserError("Нет текущей олимпиады")
+    problem = Problem.from_id(int(get_arg(message, "Необходимо указать ID задачи")))
+    response = ""
+    if problem.olymp_id != current_olymp.id:
+        if message.from_user.id != OWNER_ID:
+            raise UserError("Задача не найдена")
+        response += "⚠️ Задача не относится к текущей олимпиаде\n"
+    response += (f"Информация о задаче _{problem.name}_:\n"
+                f"ID: `{problem.id}`\n")
+    blocks = problem.get_blocks()
+    if len(blocks) == 0:
+        response += "Задача не входит ни в какие блоки"
+    else:
+        response += "Блоки задач:\n"
+        for block in blocks:
+            if block.block_type:
+                response += f"- {block.block_type.description()}\n"
+            else:
+                response += f"- Блок `{block.id}`\n"
+    bot.send_message(message.chat.id, response)
+
+
+@bot.message_handler(commands=['problem_block_create'], roles=['owner'])
 def problem_block_create(message: Message):
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")

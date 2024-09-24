@@ -60,6 +60,17 @@ class Problem:
         created_id = cursor.lastrowid
         return cls(created_id, *values)
 
+
+    @provide_cursor
+    def get_blocks(self, *, cursor: sqlite3.Cursor | None = None):
+        cursor.execute(
+            "SELECT * FROM problem_blocks WHERE first_problem = ? OR second_problem = ? OR third_problem = ?",
+            (self.id, self.id, self.id)
+        )
+        results = cursor.fetchall()
+        return [ProblemBlock(*ProblemBlock._columns_to_init_args(*fetch)) for fetch in results]
+
+
     def __set(self, column: str, value):
         update_in_table("problems", column, value, "id", self.__id)
 
@@ -80,7 +91,7 @@ class ProblemBlock:
         id: int,
         olymp_id: int,
         problems: list[Problem] | list[int],
-        block_type: BlockType | None = None,
+        block_type: BlockType | int | None = None,
         path: str | None = None
     ):
         if len(problems) != 3:
@@ -90,11 +101,14 @@ class ProblemBlock:
         if not isinstance(problems[0], Problem):
             problems = [Problem.from_id(pr_id) for pr_id in problems]
         self.__problems: list[Problem] = problems
+        if isinstance(block_type, int):
+            block_type = BlockType(block_type)
         self.__block_type: BlockType | None = block_type
         self.__path: str | None = path
 
     @classmethod
-    def __columns_to_init_args(cls, *args):
+    def _columns_to_init_args(cls, *args):
+        args = list(args)
         return args[:2] + [args[4:]] + args[2:4]
 
     @classmethod
@@ -105,7 +119,7 @@ class ProblemBlock:
             fetch = cur.fetchone()
         if not fetch:
             raise UserError("Блок задач не найден")
-        args = cls.__columns_to_init_args(*fetch)
+        args = cls._columns_to_init_args(*fetch)
         return cls(*args)
     
     @classmethod
@@ -120,7 +134,7 @@ class ProblemBlock:
             fetch = cur.fetchone()
         if not fetch:
             raise UserError("Блок задач не найден")
-        args = cls.__columns_to_init_args(*fetch)
+        args = cls._columns_to_init_args(*fetch)
         return cls(*args)  
     
     @classmethod

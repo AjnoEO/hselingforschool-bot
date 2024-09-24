@@ -2,6 +2,7 @@ from enums import OlympStatus, QueueStatus
 import sqlite3
 from db import DATABASE
 from users import Participant, Examiner
+from problem import Problem
 from utils import UserError, value_exists, provide_cursor, update_in_table
 
 
@@ -72,6 +73,30 @@ class Olymp:
             return bool(result[0])
 
 
+    @provide_cursor
+    def get_participants(self, *, cursor: sqlite3.Cursor | None = None) -> list[Participant]:
+        cursor.execute("SELECT user_id FROM participants WHERE olymp_id = ?", (self.id,))
+        results = cursor.fetchall()
+        return [Participant.from_user_id(user_id_tuple[0], self.id) for user_id_tuple in results]
+    
+    @provide_cursor
+    def get_examiners(self, *, only_free: bool = False, order_by_busyness: bool = False, cursor: sqlite3.Cursor | None = None) -> list[Participant]:
+        q = "SELECT user_id FROM examiners WHERE olymp_id = ?"
+        if only_free:
+            q += " AND is_busy = 0"
+        if order_by_busyness:
+            q += " ORDER BY busyness_level ASC"
+        cursor.execute(q, (self.id,))
+        results = cursor.fetchall()
+        return [Examiner.from_user_id(user_id_tuple[0], self.id) for user_id_tuple in results]
+    
+    @provide_cursor
+    def get_problems(self, *, cursor: sqlite3.Cursor | None = None) -> list[Problem]:
+        cursor.execute("SELECT * FROM problems WHERE olymp_id = ? ORDER BY id", (self.id,))
+        results = cursor.fetchall()
+        return [Problem(*fetch) for fetch in results]
+
+
     def __set(self, column: str, value):
         update_in_table("olymps", column, value, "id", self.__id)
 
@@ -89,20 +114,3 @@ class Olymp:
     def status(self, status: OlympStatus):
         self.__set('status', status.value)
         self.__status = status
-
-    @provide_cursor
-    def get_participants(self, *, cursor: sqlite3.Cursor | None = None) -> list[Participant]:
-        cursor.execute("SELECT user_id FROM participants WHERE olymp_id = ?", (self.id,))
-        results = cursor.fetchall()
-        return [Participant.from_user_id(user_id_tuple[0], self.id) for user_id_tuple in results]
-    
-    @provide_cursor
-    def get_examiners(self, *, only_free: bool = False, order_by_busyness: bool = False, cursor: sqlite3.Cursor | None = None) -> list[Participant]:
-        q = "SELECT user_id FROM examiners WHERE olymp_id = ?"
-        if only_free:
-            q += " AND is_busy = 0"
-        if order_by_busyness:
-            q += " ORDER BY busyness_level ASC"
-        cursor.execute(q, (self.id,))
-        results = cursor.fetchall()
-        return [Examiner.from_user_id(user_id_tuple[0], self.id) for user_id_tuple in results]
