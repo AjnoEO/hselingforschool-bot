@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS `participants` (
 	`olymp_id` INTEGER NOT NULL,
 	`user_id` INTEGER NOT NULL,
 	`grade` INTEGER NOT NULL,
-	`last_block` INTEGER NOT NULL DEFAULT 1 CHECK (`last_block` BETWEEN 1 AND 3),
+	`last_block_number` INTEGER NOT NULL DEFAULT 1 CHECK (`last_block_number` BETWEEN 1 AND 3),
 	FOREIGN KEY(`olymp_id`) REFERENCES `olymps`(`id`),
 	FOREIGN KEY(`user_id`) REFERENCES `users`(`user_id`)
 );

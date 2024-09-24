@@ -1,5 +1,5 @@
 import os
-from db import DATABASE, create_tables
+from db import DATABASE, create_update_db
 from users import User, Participant, Examiner
 from olymp import Olymp, OlympStatus
 from queue_entry import QueueEntry, QueueStatus
@@ -15,7 +15,7 @@ if answer.strip().lower() != "да":
 
 if os.path.exists(DATABASE):
     os.remove(DATABASE)
-create_tables("db.sql")
+create_update_db()
 
 olymp_test = Olymp.create("тестище", OlympStatus.TBA)
 olymp_test.status = OlympStatus.RESULTS

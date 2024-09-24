@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import re
+from db import create_update_db
 from data import TOKEN, OWNER_ID, OWNER_HANDLE
 import telebot
 from telebot.types import Message
@@ -10,6 +11,9 @@ from users import OlympMember, Participant, Examiner
 from problem import Problem, ProblemBlock, BlockType
 from utils import UserError, decline, get_arg, get_n_args, get_file
 import pandas as pd
+
+
+create_update_db()
 
 
 class MyExceptionHandler(telebot.ExceptionHandler):

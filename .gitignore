@@ -1,5 +1,6 @@
 # База данных
-olymp.db
+database/olymp.db
+database/version.txt
 
 # Рабочие файлы
 downloaded_files
