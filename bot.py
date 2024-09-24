@@ -4,7 +4,7 @@ import re
 from db import create_update_db
 from data import TOKEN, OWNER_ID, OWNER_HANDLE
 import telebot
-from telebot.types import Message, CallbackQuery
+from telebot.types import Message, CallbackQuery, InputFile
 from telebot.custom_filters import AdvancedCustomFilter
 from olymp import Olymp, OlympStatus
 from users import User, OlympMember, Participant, Examiner
@@ -159,7 +159,12 @@ def olymp_start(message: Message):
     participants = current_olymp.get_participants()
     for p in participants:
         if p.tg_id:
-            bot.send_message(p.tg_id, "Олимпиада началась! Можешь приступать к решению задач")
+            problem_block = p.last_block
+            bot.send_document(
+                p.tg_id, 
+                document=InputFile(problem_block.path, "Блок_1.pdf"),
+                caption="Олимпиада началась! Можешь приступать к решению задач"
+            )
     examiners = current_olymp.get_examiners()
     for e in examiners:
         if e.tg_id:
