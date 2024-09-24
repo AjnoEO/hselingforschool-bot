@@ -595,6 +595,6 @@ class Examiner(OlympMember):
     @property
     def is_busy(self): return self.__is_busy
     @is_busy.setter
-    def is_busy(self, value: int):
+    def is_busy(self, value: bool):
         self.__set('is_busy', value)
         self.__is_busy = value

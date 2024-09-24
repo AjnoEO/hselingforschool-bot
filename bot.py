@@ -59,7 +59,14 @@ class RolesFilter(AdvancedCustomFilter): # owner, examiner, participant
             return True
         return False
 
+class OlympStatusFilter(AdvancedCustomFilter):
+    key = 'olymp_statuses'
+    @staticmethod
+    def check(_: Message, statuses: list[OlympStatus]):
+        return current_olymp.status in statuses
+
 bot.add_custom_filter(RolesFilter())
+bot.add_custom_filter(OlympStatusFilter())
 
 current_olymp = Olymp.current()
 
@@ -342,9 +349,24 @@ def problem_block_create(message: Message):
     bot.send_message(message.chat.id, response)
 
 
-# @bot.message_handler(func=lambda message: True)
-# def echo_all(message: Message):
-#     bot.send_message(message.chat.id, message.text)
+@bot.message_handler(commands=['free', 'busy'], roles=['examiner'], olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE])
+def examiner_busyness_status(message: Message):
+    examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
+    command = telebot.util.extract_command(message.text)
+    if command == 'free' and not examiner.is_busy:
+        raise UserError("Ты уже свободен(-на). Если хочешь отметить, что ты занят(-а), используй команду /busy")
+    if command == 'busy' and examiner.is_busy:
+        raise UserError("Ты уже занят(-а). Если хочешь отметить, что ты свободен(-на), используй команду /free")
+    examiner.is_busy = not examiner.is_busy
+    if examiner.is_busy:
+        response = "Теперь к тебе не будут приходить на сдачу. Если хочешь отметить, что ты свободен(-на), используй команду /free"
+    else:
+        response = "Теперь к тебе могут прийти сдавать задачи. Если хочешь отметить, что ты занят(-а), используй команду /busy"
+    bot.send_message(
+        message.chat.id,
+        response
+    )
+
 
 print("Запускаю бота...")
 bot.infinity_polling()
