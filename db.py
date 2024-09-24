@@ -4,7 +4,8 @@ import sqlite3
 from enums import OlympStatus, QueueStatus, BlockType
 
 __DATABASE_DIR = "database"
-DATABASE = os.path.join(__DATABASE_DIR, "olymp.db")
+__DATABASE_FILE = "olymp.db"
+DATABASE = os.path.join(__DATABASE_DIR, __DATABASE_FILE)
 DB_VERSION = 2
 DB_VERSION_FILE = os.path.join(__DATABASE_DIR, "version.txt")
 SCRIPT_FILE = os.path.join(__DATABASE_DIR, "db.sql")
@@ -23,11 +24,11 @@ def set_enum(enum_type: type[Enum], table: str, cursor: sqlite3.Cursor):
     cursor.connection.commit()
 
 def create_update_db():
-    if DATABASE not in os.listdir():
+    if __DATABASE_FILE not in os.listdir(__DATABASE_DIR):
         with open(SCRIPT_FILE, encoding="utf8") as f:
             script = f.read()
         with open(DB_VERSION_FILE, "w") as f:
-            f.write(DB_VERSION)
+            f.write(str(DB_VERSION))
         with sqlite3.connect(DATABASE) as con:
             cur = con.cursor()
             cur.executescript(script)
