@@ -27,8 +27,6 @@ def create_update_db():
     if __DATABASE_FILE not in os.listdir(__DATABASE_DIR):
         with open(SCRIPT_FILE, encoding="utf8") as f:
             script = f.read()
-        with open(DB_VERSION_FILE, "w") as f:
-            f.write(str(DB_VERSION))
         with sqlite3.connect(DATABASE) as con:
             cur = con.cursor()
             cur.executescript(script)
@@ -47,6 +45,8 @@ def create_update_db():
                 for script in scripts:
                     cur.executescript(script)
                 con.commit()
+    with open(DB_VERSION_FILE, "w") as f:
+        f.write(str(DB_VERSION))
     set_enum(OlympStatus, "olymp_status", cursor=cur)
     set_enum(QueueStatus, "queue_status", cursor=cur)
     set_enum(BlockType, "block_types", cursor=cur)
