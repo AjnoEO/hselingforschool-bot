@@ -23,6 +23,28 @@ class Problem:
         if not fetch:
             raise UserError("Задача не найдена")
         return cls(*fetch)
+    
+    @classmethod
+    def from_name(cls, name: str, olymp_id: int):
+        with sqlite3.connect(DATABASE) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM problems WHERE name = ? AND olymp_id = ?", (name, olymp_id))
+            fetch = cur.fetchone()
+        if not fetch:
+            raise UserError("Задача не найдена")
+        return cls(*fetch)
+        
+    # @classmethod
+    # def __from_number(cls, olymp_id: int, number_column: str, number_value: int):
+    #     if not number_value:
+    #         raise UserError(f"Необходимо указать номер задачи")
+    #     with sqlite3.connect(DATABASE) as conn:
+    #         cur = conn.cursor()
+    #         cur.execute(f"SELECT * FROM problems WHERE {number_column} = ?", (number_value,))
+    #         fetch = cur.fetchone()
+    #     if not fetch:
+    #         raise UserError(f"Задача номер {number_value} не найдена")
+    #     return cls(*fetch)
 
     @classmethod
     @provide_cursor
