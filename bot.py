@@ -4,7 +4,8 @@ import re
 from db import create_update_db
 from data import TOKEN, OWNER_ID, OWNER_HANDLE
 import telebot
-from telebot.types import Message, CallbackQuery, InputFile
+from telebot.types import Message, CallbackQuery, InputFile, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
+from telebot.formatting import escape_markdown
 from telebot.custom_filters import AdvancedCustomFilter
 from olymp import Olymp, OlympStatus
 from users import User, OlympMember, Participant, Examiner
@@ -41,7 +42,7 @@ class MyExceptionHandler(telebot.ExceptionHandler):
                              f"`{exc.__class__.__name__} "
                              f"({filename}, строка {line_number}): {exc}`")
         error_message += f"\nЕсли тебе кажется, что это баг, сообщи {OWNER_HANDLE}"
-        bot.send_message(message.chat.id, error_message)
+        bot.send_message(message.chat.id, error_message, reply_markup=ReplyKeyboardRemove())
         return handled
 
 
@@ -347,6 +348,42 @@ def problem_block_create(message: Message):
     for problem in problem_block.problems:
         response += f"- `{problem.id}` _{problem.name}_\n"
     bot.send_message(message.chat.id, response)
+
+
+@bot.message_handler(commands=['choose_problems'], roles=['examiner'], olymp_statuses=[OlympStatus.REGISTRATION])
+def examiner_problems(message: Message):
+    examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
+    response = "Выбери задачу, чтобы добавить её в свой список задач или убрать её из него\n" + examiner.display_problem_data()
+    all_problems = current_olymp.get_problems()
+    reply_buttons = ReplyKeyboardMarkup(resize_keyboard=True)
+    problem_row = []
+    for problem in all_problems:
+        problem_row.append(problem.name)
+        if len(problem_row) == 3:
+            reply_buttons.row(*problem_row)
+            problem_row = []
+    if len(problem_row) > 0:
+        reply_buttons.row(*problem_row)
+    reply_buttons.row("[Закончить выбор]")
+    bot.send_message(message.chat.id, response, reply_markup=reply_buttons)
+    bot.register_next_step_handler_by_chat_id(message.chat.id, examiner_chooses_problem)
+
+
+def examiner_chooses_problem(message: Message):
+    if message.text == "[Закончить выбор]":
+        bot.send_message(message.chat.id, "Выбор сохранён", reply_markup=ReplyKeyboardRemove())
+        return
+    problem = Problem.from_name(message.text, current_olymp.id)
+    examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
+    if problem.id in examiner.problems:
+        examiner.remove_problem(problem)
+        response = f"Задача _{escape_markdown(problem.name)}_ удалена из твоего списка задач"
+    else:
+        examiner.add_problem(problem)
+        response = f"Задача _{escape_markdown(problem.name)}_ добавлена в твой список задач"
+    response += "\n" + examiner.display_problem_data()
+    bot.send_message(message.chat.id, response)
+    bot.register_next_step_handler_by_chat_id(message.chat.id, examiner_chooses_problem)
 
 
 @bot.message_handler(commands=['free', 'busy'], roles=['examiner'], olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE])

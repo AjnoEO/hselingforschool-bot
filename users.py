@@ -1,9 +1,10 @@
 import sqlite3
 from db import DATABASE
-from utils import UserError, provide_cursor, value_exists, update_in_table
+from utils import UserError, decline, provide_cursor, value_exists, update_in_table
 from queue_entry import QueueEntry, QueueStatus
-from problem import ProblemBlock, BlockType
+from problem import Problem, ProblemBlock, BlockType
 from data import OWNER_HANDLE
+from telebot.formatting import escape_markdown
 
 
 class User:
@@ -565,6 +566,38 @@ class Examiner(OlympMember):
     def display_data(self):
         return f"{self.name} {self.surname}, ссылка: {self.conference_link}\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLE}"
     
+    def display_problem_data(self):
+        amount = len(self.problems)
+        if amount == 0:
+            return "Сейчас у тебя нет выбранных задач"
+        result = f"Сейчас у тебя {decline(amount, 'выбран', ('а', 'о', 'о'))} {amount} {decline(amount, 'задач', ('а', 'и', ''))}:"
+        for problem_id in self.problems:
+            problem = Problem.from_id(problem_id)
+            result += f"\n- _{escape_markdown(problem.name)}_"
+        return result
+    
+    def add_problem(self, problem: Problem | int):
+        if isinstance(problem, Problem):
+            problem = problem.id
+        if problem in self.problems:
+            raise ValueError(f"Принимающий {self.id} уже принимает задачу {problem}")
+        with sqlite3.connect(DATABASE) as conn:
+            cur = conn.cursor()
+            cur.execute("INSERT INTO examiner_problems(examiner_id, problem_id) VALUES (?, ?)", (self.id, problem))
+            conn.commit()
+        self.__problems.append(problem)
+
+    def remove_problem(self, problem: Problem | int):
+        if isinstance(problem, Problem):
+            problem = problem.id
+        if problem not in self.problems:
+            raise ValueError(f"Принимающий {self.id} уже не принимает задачу {problem}")
+        with sqlite3.connect(DATABASE) as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM examiner_problems WHERE examiner_id = ? AND problem_id = ?", (self.id, problem))
+            conn.commit()
+        self.__problems.remove(problem)
+    
     @property
     def queue_entry(self):
         return self._queue_entry("examiner_id")
@@ -582,10 +615,6 @@ class Examiner(OlympMember):
         self.__conference_link = value
     @property
     def problems(self): return self.__problems
-    @problems.setter
-    def problems(self, value: list[int]):
-        self.__set('problems', ",".join(map(str, value)))
-        self.problems = value
     @property
     def busyness_level(self): return self.__busyness_level
     @busyness_level.setter
