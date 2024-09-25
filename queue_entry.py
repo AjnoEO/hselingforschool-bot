@@ -1,5 +1,6 @@
 import sqlite3
 from enums import QueueStatus
+from db import DATABASE
 from utils import update_in_table
 
 class QueueEntry:
@@ -9,8 +10,8 @@ class QueueEntry:
         olymp_id: int,
         participant_id: int,
         problem_id: int,
-        status: QueueStatus | int,
-        examiner_id: int | None
+        status: QueueStatus | int = QueueStatus.WAITING,
+        examiner_id: int | None = None
     ):
         self.__id: int = id
         self.__olymp_id: int = olymp_id
@@ -18,6 +19,33 @@ class QueueEntry:
         self.__problem_id: int = problem_id
         self.__status: QueueStatus = QueueStatus(status) if not isinstance(status, QueueStatus) else status
         self.__examiner_id: int | None = examiner_id
+
+    def look_for_examiner(self) -> int | None:
+        """
+        Найти подходящего принимающего. Если найден, возвращает его ID, если нет — возвращает `None`. 
+
+        Само `QueueEntry` не меняется! Принимающий не назначается! 
+        Чтобы назначить принимающего, используй метод `Examiner.assign_to_queue_entry`
+        """
+        if self.status != QueueStatus.WAITING:
+            raise ValueError("Нельзя искать принимающих для записей не в статусе ожидания")
+        with sqlite3.connect(DATABASE) as conn:
+            cur = conn.cursor()            
+            q = """
+                SELECT
+                    id
+                FROM 
+                    examiners 
+                    RIGHT JOIN examiner_problems ON examiners.id = examiner_problems.examiner_id
+                WHERE 
+                    is_busy = 0 AND problem_id = ?
+                ORDER BY
+                    busyness_level DESC 
+                LIMIT 1
+                """
+            cur.execute(q, (self.problem_id,))
+            fetch = cur.fetchone()
+        return fetch[0] if fetch else None
 
     def __set(self, column, value):
         update_in_table("queue", column, value, "id", self.__id)

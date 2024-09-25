@@ -429,7 +429,7 @@ class Participant(OlympMember):
             problem_number = block.problems.index(problem)
             return (block_number - 1) * 3 + problem_number + 1
         raise ValueError(f"Задача {problem.id} не дана участнику {self.id}")
-    
+
     def join_queue(self, problem: Problem | int):
         if not self.has_problem(problem):
             raise UserError("Задача недоступна")
@@ -440,26 +440,9 @@ class Participant(OlympMember):
         with sqlite3.connect(DATABASE) as conn:
             cur = conn.cursor()
             cur.execute("INSERT INTO queue(olymp_id, participant_id, problem_id) VALUES (?, ?, ?)", (self.olymp_id, self.id, problem.id))
+            queue_entry = QueueEntry(cur.lastrowid, self.olymp_id, self.id, problem.id)
 
-            cur.execute("SELECT * FROM queue WHERE id = ?", (cur.lastrowid,))
-            fetch = cur.fetchone()
-            queue_entry = QueueEntry(*fetch)
-            
-            q = """
-                SELECT
-                    id
-                FROM 
-                    examiners 
-                    RIGHT JOIN examiner_problems ON examiners.id = examiner_problems.examiner_id
-                WHERE 
-                    is_busy = 0 AND problem_id = ?
-                ORDER BY
-                    busyness_level DESC 
-                LIMIT 1
-                """
-            cur.execute(q, (problem.id,))
-            fetch = cur.fetchone()
-        examiner_id = fetch[0] if fetch else None
+        examiner_id = queue_entry.look_for_examiner()
         if examiner_id:
             examiner: Examiner = Examiner.from_id(examiner_id)
             examiner.assign_to_queue_entry(queue_entry)
@@ -652,6 +635,17 @@ class Examiner(OlympMember):
         queue_entry.status = QueueStatus.DISCUSSING
         self.is_busy = True
         self.busyness_level += 1
+
+    def withdraw_from_queue_entry(self):
+        if not self.queue_entry:
+            raise ValueError(f"Принимающий {self.id} не в очереди")
+        queue_entry = self.queue_entry
+        if queue_entry.status != QueueStatus.DISCUSSING:
+            raise ValueError("Нельзя списать принимающего с уже завершённой записи")
+        queue_entry.status = QueueStatus.WAITING
+        queue_entry.examiner_id = None
+        self.busyness_level -= 1
+
 
     def display_problem_data(self):
         amount = len(self.problems)
