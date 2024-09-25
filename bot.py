@@ -1,16 +1,20 @@
 import os
 from pathlib import Path
 import re
+
+import telebot.formatting
 from db import create_update_db
 from data import TOKEN, OWNER_ID, OWNER_HANDLE
 import telebot
-from telebot.types import Message, CallbackQuery, InputFile
+from telebot.types import Message, CallbackQuery, InputFile, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telebot.custom_filters import AdvancedCustomFilter
 from olymp import Olymp, OlympStatus
 from users import User, OlympMember, Participant, Examiner
 from problem import Problem, ProblemBlock, BlockType
+from queue_entry import QueueEntry, QueueStatus
 from utils import UserError, decline, get_arg, get_n_args, get_file
 import pandas as pd
+from io import BytesIO
 
 
 create_update_db()
@@ -241,7 +245,7 @@ def upload_members(message: Message, required_columns: list[str], member_class: 
     if current_olymp.status != OlympStatus.TBA:
         raise UserError("Регистрация на олимпиаду или олимпиада уже начата")
     file_data = get_file(message, bot, "Необходимо указать Excel-таблицу")
-    member_table = pd.read_excel(file_data)
+    member_table = pd.read_excel(BytesIO(file_data))
     if set(member_table.columns) != set(required_columns):
         bot.send_message(message.chat.id, "Таблица должна содержать столбцы " + ', '.join([f'`{col}`' for col in required_columns]))
         return
@@ -366,6 +370,103 @@ def examiner_busyness_status(message: Message):
         message.chat.id,
         response
     )
+
+
+def announce_queue_entry(queue_entry: QueueEntry):
+    participant: Participant = Participant.from_id(queue_entry.participant_id)
+    problem: Problem = Problem.from_id(queue_entry.problem_id)
+    problem_number = participant.get_problem_number(problem)
+    
+    if not queue_entry.examiner_id:
+        if queue_entry.status == QueueStatus.WAITING:
+            response = (f"Ты теперь в очереди на задачу {problem_number}: _{telebot.formatting.escape_markdown(problem.name)}_. "
+                        f"Свободных принимающих пока нет, но бот напишет тебе, когда кто-то подходящий освободится. "
+                        f"Чтобы покинуть очередь, используй команду /leave\_queue")
+            bot.send_message(participant.tg_id, response)
+            return
+        elif queue_entry.status == QueueStatus.CANCELED:
+            response = ("Ты больше не в очереди. Чтобы записаться на сдачу задачи снова, используй команду `/queue <номер задачи>`")
+            bot.send_message(participant.tg_id, response)
+            return
+    
+    examiner: Examiner = Examiner.from_id(queue_entry.examiner_id)
+
+    if queue_entry.status == QueueStatus.FAIL:
+        attempts = participant.attempts_left(problem)
+        participant_response = (f"Задача {problem_number} _{telebot.formatting.escape_markdown(problem.name)}_ не принята. "
+                                f"У тебя {decline(attempts, 'остал', ('ась', 'ось', 'ось'))} {attempts} {decline(attempts, 'попыт', ('ка', 'ки', 'ок'))}, "
+                                f"чтобы её сдать. Чтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`")
+        bot.send_message(participant.tg_id, participant_response, reply_markup=ReplyKeyboardRemove())
+        examiner_response = (f"Задача _{telebot.formatting.escape_markdown(problem.name)}_ отмечена как несданная участником {participant.name} {participant.surname}. "
+                             f"Чтобы продолжить принимать задачи, используй команду /free")
+        bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
+        return
+    if queue_entry.status == QueueStatus.CANCELED:
+        participant_response = ("Сдача задача отменена. Ты больше не в очереди. Попытка не потрачена. "
+                                "Чтобы записаться на сдачу задачи снова, используй команду `/queue <номер задачи>`")
+        bot.send_message(participant.tg_id, response)
+        examiner_response = (f"Сдача задачи _{telebot.formatting.escape_markdown(problem.name)}_ участником {participant.name} {participant.surname} отменена. "
+                             f"Чтобы продолжить принимать задачи, используй команду /free")
+        bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
+        return
+    if queue_entry.status == QueueStatus.SUCCESS:
+        participant_response = (f"Задача {problem_number} _{telebot.formatting.escape_markdown(problem.name)}_ принята! Поздравляем. "
+                                f"Чтобы записаться на сдачу другой задачи, используй команду `/queue <номер задачи>`")
+        bot.send_message(participant.tg_id, participant_response, reply_markup=ReplyKeyboardRemove())
+        examiner_response = (f"Задача _{telebot.formatting.escape_markdown(problem.name)}_ отмечена как успешно сданная участником {participant.name} {participant.surname}. "
+                             f"Чтобы продолжить принимать задачи, используй команду /free")
+        bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
+        return
+    participant_response = (f"Задачу {problem_number} _{telebot.formatting.escape_markdown(problem.name)}_ у тебя примет {examiner.name} {examiner.surname}.\n"
+                            f"Ссылка: {examiner.conference_link}")
+    bot.send_message(participant.tg_id, participant_response)
+    examiner_response = (f"К тебе идёт сдавать задачу _{telebot.formatting.escape_markdown(problem.name)}_ {examiner.name} {examiner.surname}. "
+                         f"Ты можешь принять или отклонить решение, а также отменить сдачу (например, если участник "
+                         f"не пришёл или ты не хочешь учитывать эту сдачу как потраченную попытку)")
+    reply_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    reply_keyboard.add("Принято", "Не принято", "Отмена")
+    bot.send_message(examiner.tg_id, examiner_response, reply_markup=reply_keyboard)
+    bot.register_next_step_handler_by_chat_id(examiner.tg_id, examiner_buttons_callback)
+
+
+def examiner_buttons_callback(message: Message):
+    result_status = QueueStatus.from_message(message.text, no_error = True)
+    if not result_status:
+        bot.send_message(message.chat.id, "Выбери результат сдачи на клавиатуре")
+        bot.register_next_step_handler_by_chat_id(message.chat.id, examiner_buttons_callback)
+        return
+    examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
+    queue_entry: QueueEntry = examiner.queue_entry
+    queue_entry.status = result_status
+    announce_queue_entry(queue_entry)
+
+
+@bot.message_handler(commands=['queue'], roles=['participant'], olymp_statuses=[OlympStatus.CONTEST])
+def join_queue(message: Message):
+    participant: Participant = Participant.from_tg_id(message.from_user.id, current_olymp.id)
+    if participant.queue_entry:
+        problem = Problem(participant.queue_entry.problem_id)
+        problem_number = participant.get_problem_number(problem)
+        raise UserError(f"Ты уже в очереди на задачу {problem_number}: _{problem.name}_. Чтобы покинуть очередь, используй команду /leave_queue")
+    args = get_arg(message, "Необходимо указать номер задачи")
+    if not args.isnumeric():
+        raise UserError("Необходимо указать номер задачи")
+    problem_number = int(args)
+    problem = participant.problem_from_number(problem_number)
+    queue_entry = participant.join_queue(problem)
+    announce_queue_entry(queue_entry)
+
+
+@bot.message_handler(commands=['leave_queue'], roles=['participant'], olymp_statuses=[OlympStatus.CONTEST])
+def leave_queue(message: Message):
+    participant: Participant = Participant.from_tg_id(message.from_user.id, current_olymp.id)
+    if not participant.queue_entry:
+        raise UserError("Ты уже не в очереди. Чтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`")
+    queue_entry = participant.queue_entry
+    if queue_entry.status != QueueStatus.WAITING:
+        raise UserError("Нельзя покинуть очередь во время сдачи задач")
+    queue_entry.status = QueueStatus.CANCELED
+    announce_queue_entry(queue_entry)
 
 
 print("Запускаю бота...")

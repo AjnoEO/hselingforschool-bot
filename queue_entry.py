@@ -9,14 +9,14 @@ class QueueEntry:
         olymp_id: int,
         participant_id: int,
         problem_id: int,
-        status: QueueStatus | str,
+        status: QueueStatus | int,
         examiner_id: int | None
     ):
         self.__id: int = id
         self.__olymp_id: int = olymp_id
         self.__participant_id: int = participant_id
         self.__problem_id: int = problem_id
-        self.__status: QueueStatus = QueueStatus(status) if isinstance(status, str) else status
+        self.__status: QueueStatus = QueueStatus(status) if not isinstance(status, QueueStatus) else status
         self.__examiner_id: int | None = examiner_id
 
     def __set(self, column, value):

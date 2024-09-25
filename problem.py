@@ -23,18 +23,6 @@ class Problem:
         if not fetch:
             raise UserError("Задача не найдена")
         return cls(*fetch)
-        
-    # @classmethod
-    # def __from_number(cls, olymp_id: int, number_column: str, number_value: int):
-    #     if not number_value:
-    #         raise UserError(f"Необходимо указать номер задачи")
-    #     with sqlite3.connect(DATABASE) as conn:
-    #         cur = conn.cursor()
-    #         cur.execute(f"SELECT * FROM problems WHERE {number_column} = ?", (number_value,))
-    #         fetch = cur.fetchone()
-    #     if not fetch:
-    #         raise UserError(f"Задача номер {number_value} не найдена")
-    #     return cls(*fetch)
 
     @classmethod
     @provide_cursor
@@ -84,6 +72,8 @@ class Problem:
     def name(self, value: str):
         self.__set("name", value)
         self.__name = value
+
+    def __eq__(self, other): return isinstance(other, self.__class__) and self.id == other.id
 
 class ProblemBlock:
     def __init__(
@@ -158,7 +148,7 @@ class ProblemBlock:
             fetch = cursor.fetchone()
             if fetch is not None:
                 block_id = fetch[0]
-                raise UserError(f"Блок типа {block_type} уже есть: {block_id}")
+                raise UserError(f"Блок типа `{block_type}` уже есть: `{block_id}`")
         if not isinstance(problems[0], int):
             problems = [pr.id for pr in problems]
         values = [olymp_id, block_type, path] + problems

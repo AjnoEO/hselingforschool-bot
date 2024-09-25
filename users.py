@@ -2,7 +2,7 @@ import sqlite3
 from db import DATABASE
 from utils import UserError, provide_cursor, value_exists, update_in_table
 from queue_entry import QueueEntry, QueueStatus
-from problem import ProblemBlock, BlockType
+from problem import Problem, ProblemBlock, BlockType
 from data import OWNER_HANDLE
 
 
@@ -278,9 +278,9 @@ class OlympMember(User):
     def _queue_entry(self, id_column: str):
         with sqlite3.connect(DATABASE) as conn:
             cur = conn.cursor()
-            q = (f"SELECT * FROM queue WHERE {id_column} = ?"
+            q = (f"SELECT * FROM queue WHERE {id_column} = ? "
                  f"AND status IN ({', '.join(map(str, QueueStatus.active(as_numbers=True)))})")
-            cur.execute(q, (self.__id,))
+            cur.execute(q, (self.id,))
             fetch = cur.fetchone()
         if fetch is not None:
             return QueueEntry(*fetch)
@@ -396,11 +396,89 @@ class Participant(OlympMember):
             return super().from_id(id, "participants", error_user_not_found=None)
         return super().from_id(id, "participants", error_user_not_found="Участник не найден")
 
+
     def display_data(self):
         return f"{self.name} {self.surname}, {self.grade} класс\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLE}"
+    
+    def problem_block_from_number(self, number: int):
+        block_type = BlockType[('JUNIOR' if self.is_junior else 'SENIOR') + '_' + str(number)]
+        return ProblemBlock.from_block_type(self.olymp_id, block_type)
+    
+    def problem_from_number(self, number: int):
+        number = number - 1
+        block_number, problem_number = number // 3 + 1, number % 3
+        problem_block = self.problem_block_from_number(block_number)
+        return problem_block.problems[problem_number]
+    
+    def has_problem(self, problem: Problem | int):
+        if isinstance(problem, Problem):
+            for block_number in range(1, self.last_block_number + 1):
+                block = self.problem_block_from_number(block_number)
+                if problem in block.problems:
+                    return True
+            return False
+        else:
+            return self.last_block_number * 3 >= problem
+
+    def get_problem_number(self, problem: Problem):
+        for block_number in range(1, self.last_block_number + 1):
+            block = self.problem_block_from_number(block_number)
+            if problem not in block.problems:
+                continue
+            problem_number = block.problems.index(problem)
+            return (block_number - 1) * 3 + problem_number + 1
+        raise ValueError(f"Задача {problem.id} не дана участнику {self.id}")
+    
+    def join_queue(self, problem: Problem | int):
+        if not self.has_problem(problem):
+            raise UserError("Задача недоступна")
+        
+        if isinstance(problem, int):
+            problem = self.problem_from_number(problem)
+
+        with sqlite3.connect(DATABASE) as conn:
+            cur = conn.cursor()
+            cur.execute("INSERT INTO queue(olymp_id, participant_id, problem_id) VALUES (?, ?, ?)", (self.olymp_id, self.id, problem.id))
+
+            cur.execute("SELECT * FROM queue WHERE id = ?", (cur.lastrowid,))
+            fetch = cur.fetchone()
+            queue_entry = QueueEntry(*fetch)
+            
+            q = """
+                SELECT
+                    id
+                FROM 
+                    examiners 
+                    RIGHT JOIN examiner_problems ON examiners.id = examiner_problems.examiner_id
+                WHERE 
+                    is_busy = 0 AND problem_id = ?
+                ORDER BY
+                    busyness_level DESC 
+                LIMIT 1
+                """
+            cur.execute(q, (problem.id,))
+            fetch = cur.fetchone()
+        examiner_id = fetch[0] if fetch else None
+        if examiner_id:
+            examiner: Examiner = Examiner.from_id(examiner_id)
+            examiner.assign_to_queue_entry(queue_entry)
+        return queue_entry
+
+    
+    def attempts_left(self, problem: Problem | int):
+        if isinstance(problem, int):
+            problem = self.problem_from_number(problem)
+        with sqlite3.connect(DATABASE) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT 1 FROM queue WHERE participant_id = ? AND status = ?", (self.id, QueueStatus.FAIL))
+            fetch = cur.fetchall()
+        if not fetch:
+            return 3
+        return 3 - len(fetch)
+
 
     @property
-    def queue_entry(self):
+    def queue_entry(self) -> QueueEntry | None:
         return self._queue_entry("participant_id")
 
     def __set(self, column: str, value):
@@ -425,9 +503,7 @@ class Participant(OlympMember):
     @property
     def is_senior(self): return not self.is_junior
     @property
-    def last_block(self):
-        block_type = BlockType[('JUNIOR' if self.is_junior else 'SENIOR') + '_' + str(self.last_block_number)]
-        return ProblemBlock.from_block_type(self.olymp_id, block_type)
+    def last_block(self): return self.problem_block_from_number(self.last_block_number)
 
 
 class Examiner(OlympMember):
@@ -562,11 +638,23 @@ class Examiner(OlympMember):
             return super().from_id(id, "examiners", error_user_not_found=None)
         return super().from_id(id, "examiners", error_user_not_found="Принимающий не найден")
 
+
     def display_data(self):
         return f"{self.name} {self.surname}, ссылка: {self.conference_link}\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLE}"
     
+    def assign_to_queue_entry(self, queue_entry: QueueEntry):
+        if self.queue_entry:
+            raise ValueError(f"Принимающий {self.id} уже есть в очереди (запись {self.queue_entry.id})")
+        if queue_entry.status != QueueStatus.WAITING:
+            raise ValueError(f"Нельзя записать принимающего в очередь на запись не со статусом ожидания")
+        queue_entry.examiner_id = self.id
+        queue_entry.status = QueueStatus.DISCUSSING
+        self.is_busy = True
+        self.busyness_level += 1
+
+    
     @property
-    def queue_entry(self):
+    def queue_entry(self) -> QueueEntry | None:
         return self._queue_entry("examiner_id")
     
     def __set(self, column: str, value):

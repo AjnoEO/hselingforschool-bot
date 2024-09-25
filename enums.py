@@ -30,6 +30,19 @@ class QueueStatus(SqliteCompatibleEnum):
             return [s.value for s in active_statuses]
         else:
             return active_statuses
+        
+    @classmethod
+    def from_message(cls, message: str, no_error: bool = False):
+        match message.lower().strip():
+            case "принято":
+                return cls.SUCCESS
+            case "не принято":
+                return cls.FAIL
+            case "отмена":
+                return cls.CANCELED
+        if no_error:
+            return None
+        raise ValueError(f"Неизвестный статус сдачи: {message}")
 
 
 class BlockType(SqliteCompatibleEnum):
