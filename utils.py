@@ -10,6 +10,7 @@ class UserError(Exception):
     """Ошибки, вызванные неправильными действиями пользователей"""
 
 def decline(numeral: int, stem: str, endings: tuple[str]):
+    numeral = abs(numeral)
     if (numeral // 10) % 10 == 1:
         return stem + endings[2]
     if numeral % 10 == 1:
