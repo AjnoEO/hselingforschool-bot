@@ -463,7 +463,11 @@ class Participant(OlympMember):
             examiner.assign_to_queue_entry(queue_entry)
         return queue_entry
 
-    
+    def solved(self, problem: Problem | int):
+        if isinstance(problem, int):
+            problem = self.problem_from_number(problem)
+        return value_exists("queue", {"participant_id": self.id, "status": QueueStatus.SUCCESS})
+
     def attempts_left(self, problem: Problem | int):
         if isinstance(problem, int):
             problem = self.problem_from_number(problem)

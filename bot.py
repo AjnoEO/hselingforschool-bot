@@ -594,6 +594,10 @@ def join_queue(message: Message):
         raise UserError("Необходимо указать номер задачи")
     problem_number = int(args)
     problem = participant.problem_from_number(problem_number)
+    if participant.attempts_left(problem) <= 0:
+        raise UserError(f"У тебя не осталось попыток чтобы сдать задачу {problem_number}: _{escape_markdown(problem.name)}_… Стоит заняться другими задачами")
+    if participant.solved(problem):
+        raise UserError(f"Задача {problem_number}: _{escape_markdown(problem.name)}_ уже сдана! Займись другими задачами")
     queue_entry = participant.join_queue(problem)
     announce_queue_entry(queue_entry)
 
