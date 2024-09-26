@@ -466,9 +466,20 @@ def announce_queue_entry(queue_entry: QueueEntry):
         bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
         return
     if queue_entry.status == QueueStatus.SUCCESS:
-        participant_response = (f"Задача {problem_number} _{escape_markdown(problem.name)}_ принята! Поздравляем\n"
-                                f"Чтобы записаться на сдачу другой задачи, используй команду `/queue <номер задачи>`")
-        bot.send_message(participant.tg_id, participant_response)
+        if participant.should_get_new_problem(problem):
+            new_problem_block = participant.give_next_problem_block()
+            participant_response = (f"Задача {problem_number} _{escape_markdown(problem.name)}_ принята! Поздравляем\n"
+                                    f"За решение этой задачи тебе полагается {participant.last_block_number} блок задач. Теперь можешь сдавать и их!\n"
+                                    f"Чтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`")
+            bot.send_document(
+                participant.tg_id, 
+                document=InputFile(new_problem_block.path, f"Блок_{participant.last_block_number}.pdf"),
+                caption=participant_response
+            )
+        else:
+            participant_response = (f"Задача {problem_number} _{escape_markdown(problem.name)}_ принята! Поздравляем\n"
+                                    f"Чтобы записаться на сдачу другой задачи, используй команду `/queue <номер задачи>`")
+            bot.send_message(participant.tg_id, participant_response)
         examiner_response = (f"Задача _{escape_markdown(problem.name)}_ отмечена как успешно сданная участником {participant.name} {participant.surname}. "
                              f"Чтобы продолжить принимать задачи, используй команду /free")
         bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())

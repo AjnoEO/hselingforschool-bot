@@ -430,6 +430,21 @@ class Participant(OlympMember):
             return (block_number - 1) * 3 + problem_number + 1
         raise ValueError(f"Задача {problem.id} не дана участнику {self.id}")
 
+    def should_get_new_problem(self, problem: Problem | int):
+        if not self.has_problem(problem):
+            raise UserError("Задача недоступна")
+        if self.last_block_number == 3:
+            return False
+        if isinstance(problem, Problem):
+            problem = self.get_problem_number(problem)
+        return (self.last_block_number == (problem - 1) // 3 + 1)
+    
+    def give_next_problem_block(self):
+        if self.last_block_number >= 3:
+            raise ValueError("Участник уже получил все блоки задач")
+        self.last_block_number += 1
+        return self.last_block
+
     def join_queue(self, problem: Problem | int):
         if not self.has_problem(problem):
             raise UserError("Задача недоступна")
