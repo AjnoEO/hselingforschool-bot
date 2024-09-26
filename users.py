@@ -466,14 +466,14 @@ class Participant(OlympMember):
     def solved(self, problem: Problem | int):
         if isinstance(problem, int):
             problem = self.problem_from_number(problem)
-        return value_exists("queue", {"participant_id": self.id, "status": QueueStatus.SUCCESS})
+        return value_exists("queue", {"participant_id": self.id, "problem_id": problem.id, "status": QueueStatus.SUCCESS})
 
     def attempts_left(self, problem: Problem | int):
         if isinstance(problem, int):
             problem = self.problem_from_number(problem)
         with sqlite3.connect(DATABASE) as conn:
             cur = conn.cursor()
-            cur.execute("SELECT 1 FROM queue WHERE participant_id = ? AND status = ?", (self.id, QueueStatus.FAIL))
+            cur.execute("SELECT 1 FROM queue WHERE participant_id = ? AND problem_id = ? AND status = ?", (self.id, problem.id, QueueStatus.FAIL))
             fetch = cur.fetchall()
         if not fetch:
             return 3
