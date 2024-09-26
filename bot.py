@@ -403,7 +403,7 @@ def examiner_chooses_problem(message: Message):
     bot.register_next_step_handler_by_chat_id(message.chat.id, examiner_chooses_problem)
 
 
-@bot.message_handler(commands=['free', 'busy'], roles=['examiner'], olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE])
+@bot.message_handler(commands=['free', 'busy'], roles=['examiner'], olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE], discussing_examiner=False)
 def examiner_busyness_status(message: Message):
     examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
     command = telebot.util.extract_command(message.text)
@@ -420,6 +420,11 @@ def examiner_busyness_status(message: Message):
         message.chat.id,
         response
     )
+    if not examiner.is_busy:
+        queue_entry = examiner.look_for_queue_entry()
+        if queue_entry:
+            examiner.assign_to_queue_entry(queue_entry)
+            announce_queue_entry(queue_entry)
 
 
 def announce_queue_entry(queue_entry: QueueEntry):
@@ -489,7 +494,7 @@ def withdraw_examiner(message: Message):
     examiner_response = (f"{participant.name} {participant.surname} пожаловался(-лась), что тебя не было на приёме задачи. "
                          f"Пожалуйста, используй команду /busy, если тебе надо отойти!\n"
                          f"Бот установил тебе статус \"занят(-а)\". Когда вернёшься, используй команду /free, чтобы продолжить принимать задачи")
-    bot.send_message(examiner.tg_id, examiner_response)
+    bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
     queue_entry = participant.queue_entry
     new_examiner_id = queue_entry.look_for_examiner()
     if new_examiner_id:

@@ -646,6 +646,32 @@ class Examiner(OlympMember):
         queue_entry.examiner_id = None
         self.busyness_level -= 1
 
+    def look_for_queue_entry(self):
+        """
+        Найти подходящую запись в очереди. Если найдена, возвращает её как `QueueEntry`, если нет — возвращает `None`.
+
+        Само `QueueEntry` не меняется! Принимающий не назначается!
+        Чтобы назначить принимающего, используй метод `Examiner.assign_to_queue_entry`
+        """
+        if self.queue_entry:
+            raise ValueError(f"Принимающий {self.id} уже есть в очереди (запись {self.queue_entry.id})")
+        with sqlite3.connect(DATABASE) as conn:
+            cur = conn.cursor()            
+            q = f"""
+                SELECT
+                    *
+                FROM
+                    queue 
+                WHERE 
+                    status = ?
+                    AND problem_id IN ({', '.join(map(str, self.problems))})
+                ORDER BY
+                    id ASC
+                LIMIT 1
+                """
+            cur.execute(q, (QueueStatus.WAITING,))
+            fetch = cur.fetchone()
+        return QueueEntry(*fetch) if fetch else None
 
     def display_problem_data(self):
         amount = len(self.problems)
@@ -679,6 +705,7 @@ class Examiner(OlympMember):
             conn.commit()
         self.__problems.remove(problem)
     
+
     @property
     def queue_entry(self) -> QueueEntry | None:
         return self._queue_entry("examiner_id")
