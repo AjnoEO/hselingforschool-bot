@@ -480,6 +480,31 @@ def announce_queue_entry(queue_entry: QueueEntry):
     bot.send_message(examiner.tg_id, examiner_response, reply_markup=examiner_keyboard)
 
 
+@bot.message_handler(commands=['withdraw_examiner'], roles=['owner'], olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE])
+def withdraw_examiner(message: Message):
+    examiner_tg_handle = get_arg(message, no_arg_error="Необходимо указать хэндл принимающего")
+    examiner: Examiner = Examiner.from_tg_handle(examiner_tg_handle, current_olymp.id)
+    participant: Participant = Participant.from_id(examiner.queue_entry.participant_id)
+    examiner.withdraw_from_queue_entry()
+    examiner_response = (f"{participant.name} {participant.surname} пожаловался(-лась), что тебя не было на приёме задачи. "
+                         f"Пожалуйста, используй команду /busy, если тебе надо отойти!\n"
+                         f"Бот установил тебе статус \"занят(-а)\". Когда вернёшься, используй команду /free, чтобы продолжить принимать задачи")
+    bot.send_message(examiner.tg_id, examiner_response)
+    queue_entry = participant.queue_entry
+    new_examiner_id = queue_entry.look_for_examiner()
+    if new_examiner_id:
+        new_examiner: Examiner = Examiner.from_id(new_examiner_id)
+        new_examiner.assign_to_queue_entry(queue_entry)
+        announce_queue_entry(queue_entry)
+    else:
+        problem = Problem.from_id(queue_entry.problem_id)
+        problem_number = participant.get_problem_number(problem)
+        participant_response = (f"Вернули тебя в начало очереди на задачу {problem_number}: _{escape_markdown(problem.name)}_. "
+                                f"Свободных принимающих пока нет, но бот напишет тебе, когда подходящий принимающий освободится. "
+                                f"Чтобы покинуть очередь, используй команду /leave\_queue")
+        bot.send_message(participant.tg_id, participant_response)
+
+
 @bot.message_handler(discussing_examiner = True)
 def examiner_buttons_callback(message: Message):
     result_status = QueueStatus.from_message(message.text, no_error = True)
@@ -517,7 +542,7 @@ def examiner_didnt_come_handler(callback_query: CallbackQuery):
     bot.edit_message_reply_markup(message.chat.id, message.id, reply_markup=None)
     examiner: Examiner = Examiner.from_id(participant.queue_entry.examiner_id)
     examiner.withdraw_from_queue_entry()
-    examiner_response = (f"{participant.name} {participant.surname} отметил, что тебя не было на приёме задачи. "
+    examiner_response = (f"{participant.name} {participant.surname} отметил(-а), что тебя не было на приёме задачи. "
                          f"Пожалуйста, используй команду /busy, если тебе надо отойти!\n"
                          f"Бот установил тебе статус \"занят(-а)\". Когда вернёшься, используй команду /free, чтобы продолжить принимать задачи")
     bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
