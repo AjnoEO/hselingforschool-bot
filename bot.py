@@ -301,6 +301,18 @@ def problem_create(message: Message):
     bot.send_message(message.chat.id, f"Задача _{problem.name}_ добавлена! ID: `{problem.id}`")
 
 
+@bot.message_handler(commands=['problem_rename'], roles=['owner'])
+def problem_rename(message: Message):
+    if not current_olymp:
+        raise UserError("Нет текущей олимпиады")
+    id, name = tuple(get_n_args(message, 2, 2, "Необходимо указать ID задачи и новое название"))
+    problem = Problem.from_id(int(id))
+    if problem.olymp_id != current_olymp.id:
+        raise UserError("Задача не относится к текущей олимпиаде")
+    problem.name = name
+    bot.send_message(message.chat.id, f"Задача `{problem.id}` переименована: _{problem.name}_")
+
+
 @bot.message_handler(commands=['problem_list'], roles=['owner', 'examiner'])
 def problem_list(message: Message):
     if not current_olymp:

@@ -25,12 +25,14 @@ class Problem:
         return cls(*fetch)
     
     @classmethod
-    def from_name(cls, name: str, olymp_id: int):
+    def from_name(cls, name: str, olymp_id: int, no_error: bool = False):
         with sqlite3.connect(DATABASE) as conn:
             cur = conn.cursor()
             cur.execute("SELECT * FROM problems WHERE name = ? AND olymp_id = ?", (name, olymp_id))
             fetch = cur.fetchone()
         if not fetch:
+            if no_error:
+                return None
             raise UserError("Задача не найдена")
         return cls(*fetch)
         
@@ -92,6 +94,8 @@ class Problem:
     def name(self): return self.__name
     @name.setter
     def name(self, value: str):
+        if Problem.from_name(value, self.olymp_id, no_error=True):
+            raise UserError(f"Задача с названием {value} уже есть в этой олимпиаде")
         self.__set("name", value)
         self.__name = value
 

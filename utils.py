@@ -30,10 +30,10 @@ def get_arg(message: Message, no_arg_error: str):
 
 
 def get_n_args(message: Message, min: int, max: int, no_arg_error: str):
-    command_arg = message.text.split(maxsplit=max)
+    command_arg = message.text.split(maxsplit=max)[1:]
     if len(command_arg) < min:
         raise UserError(no_arg_error)
-    return command_arg[1:]
+    return command_arg
 
 
 def get_file(message: Message, bot: TeleBot, no_file_error: str, expected_type: str | None = None):
