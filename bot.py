@@ -214,6 +214,17 @@ def olymp_start(message: Message):
     bot.send_message(message.chat.id, f"Олимпиада _{current_olymp.name}_ начата")
 
 
+def finish_olymp():
+    if not current_olymp or current_olymp.status not in [OlympStatus.CONTEST, OlympStatus.QUEUE]:
+        raise UserError("Олимпиады нет или она ещё не начата/уже завершена")
+    current_olymp.status = OlympStatus.RESULTS
+    e_message = "Олимпиада завершилась! Очередь пуста, так что можешь идти отдыхать"
+    for e in current_olymp.get_examiners():
+        if e.tg_id:
+            bot.send_message(e.tg_id, e_message)
+    bot.send_message(OWNER_ID, "Олимпиада завершена. Очередь полностью обработана")
+
+
 @bot.message_handler(commands=['olymp_finish'], roles=['owner'])
 def olymp_finish(message: Message):
     if not current_olymp:
@@ -244,15 +255,10 @@ def olymp_finish(message: Message):
                 bot.send_message(e.tg_id, e_message)
         bot.send_message(message.chat.id, "Олимпиада завершена. Идёт работа с очередью")
     else:
-        current_olymp.status = OlympStatus.RESULTS
-        e_message = "Олимпиада завершилась! Очередь пуста, так что можешь идти отдыхать"
         for p in participants:
             if p.tg_id:
                 bot.send_message(p.tg_id, p_not_in_queue_message)
-        for e in examiners:
-            if e.tg_id:
-                bot.send_message(e.tg_id, e_message)
-        bot.send_message(message.chat.id, "Олимпиада завершена. Очередь полностью обработана")
+        finish_olymp()
 
 
 @bot.message_handler(commands=['olymp_create'], roles=['owner'])
@@ -475,44 +481,73 @@ def announce_queue_entry(queue_entry: QueueEntry):
     
     examiner: Examiner = Examiner.from_id(queue_entry.examiner_id)
 
-    if queue_entry.status == QueueStatus.FAIL:
-        attempts = participant.attempts_left(problem)
-        participant_response = (f"Задача {problem_number} _{escape_markdown(problem.name)}_ не принята. "
-                                f"У тебя {decline(attempts, 'остал', ('ась', 'ось', 'ось'))} {attempts} {decline(attempts, 'попыт', ('ка', 'ки', 'ок'))}, "
-                                f"чтобы её сдать\n"
-                                f"Чтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`")
-        bot.send_message(participant.tg_id, participant_response)
-        examiner_response = (f"Задача _{escape_markdown(problem.name)}_ отмечена как несданная участником {participant.name} {participant.surname}. "
-                             f"Чтобы продолжить принимать задачи, используй команду /free")
-        bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
-        return
-    if queue_entry.status == QueueStatus.CANCELED:
-        participant_response = ("Сдача задачи отменена. Ты больше не в очереди. Попытка не потрачена\n"
-                                "Чтобы записаться на сдачу задачи снова, используй команду `/queue <номер задачи>`")
-        bot.send_message(participant.tg_id, participant_response)
-        examiner_response = (f"Сдача задачи _{escape_markdown(problem.name)}_ участником {participant.name} {participant.surname} отменена. "
-                             f"Чтобы продолжить принимать задачи, используй команду /free")
-        bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
-        return
-    if queue_entry.status == QueueStatus.SUCCESS:
-        if participant.should_get_new_problem(problem):
-            new_problem_block = participant.give_next_problem_block()
-            participant_response = (f"Задача {problem_number} _{escape_markdown(problem.name)}_ принята! Поздравляем\n"
-                                    f"За решение этой задачи тебе полагается {participant.last_block_number} блок задач. Теперь можешь сдавать и их!\n"
+    if current_olymp.status == OlympStatus.CONTEST:
+        if queue_entry.status == QueueStatus.FAIL:
+            attempts = participant.attempts_left(problem)
+            participant_response = (f"Задача {problem_number} _{escape_markdown(problem.name)}_ не принята. "
+                                    f"У тебя {decline(attempts, 'остал', ('ась', 'ось', 'ось'))} "
+                                    f"{attempts} {decline(attempts, 'попыт', ('ка', 'ки', 'ок'))}, "
+                                    f"чтобы её сдать\n"
                                     f"Чтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`")
-            bot.send_document(
-                participant.tg_id, 
-                document=InputFile(new_problem_block.path, f"Блок_{participant.last_block_number}.pdf"),
-                caption=participant_response
-            )
-        else:
-            participant_response = (f"Задача {problem_number} _{escape_markdown(problem.name)}_ принята! Поздравляем\n"
-                                    f"Чтобы записаться на сдачу другой задачи, используй команду `/queue <номер задачи>`")
             bot.send_message(participant.tg_id, participant_response)
-        examiner_response = (f"Задача _{escape_markdown(problem.name)}_ отмечена как успешно сданная участником {participant.name} {participant.surname}. "
-                             f"Чтобы продолжить принимать задачи, используй команду /free")
-        bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
+            examiner_response = (f"Задача _{escape_markdown(problem.name)}_ отмечена как несданная участником {participant.name} {participant.surname}. "
+                                f"Чтобы продолжить принимать задачи, используй команду /free")
+            bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
+            return
+        if queue_entry.status == QueueStatus.CANCELED:
+            participant_response = ("Сдача задачи отменена. Ты больше не в очереди. Попытка не потрачена\n"
+                                    "Чтобы записаться на сдачу задачи снова, используй команду `/queue <номер задачи>`")
+            bot.send_message(participant.tg_id, participant_response)
+            examiner_response = (f"Сдача задачи _{escape_markdown(problem.name)}_ участником {participant.name} {participant.surname} отменена. "
+                                f"Чтобы продолжить принимать задачи, используй команду /free")
+            bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
+            return
+        if queue_entry.status == QueueStatus.SUCCESS:
+            if participant.should_get_new_problem(problem):
+                new_problem_block = participant.give_next_problem_block()
+                participant_response = (f"Задача {problem_number} _{escape_markdown(problem.name)}_ принята! Поздравляем\n"
+                                        f"За решение этой задачи тебе полагается {participant.last_block_number} блок задач. Теперь можешь сдавать и их!\n"
+                                        f"Чтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`")
+                bot.send_document(
+                    participant.tg_id, 
+                    document=InputFile(new_problem_block.path, f"Блок_{participant.last_block_number}.pdf"),
+                    caption=participant_response
+                )
+            else:
+                participant_response = (f"Задача {problem_number} _{escape_markdown(problem.name)}_ принята! Поздравляем\n"
+                                        f"Чтобы записаться на сдачу другой задачи, используй команду `/queue <номер задачи>`")
+                bot.send_message(participant.tg_id, participant_response)
+            examiner_response = (f"Задача _{escape_markdown(problem.name)}_ отмечена как успешно сданная участником {participant.name} {participant.surname}. "
+                                f"Чтобы продолжить принимать задачи, используй команду /free")
+            bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
+            return
+    else:
+        if queue_entry.status == QueueStatus.FAIL:
+            attempts = participant.attempts_left(problem)
+            participant_response = (f"Задача {problem_number} _{escape_markdown(problem.name)}_ не принята\n"
+                                    f"Олимпиада завершена, можешь отправляться на заслуженный отдых")
+            bot.send_message(participant.tg_id, participant_response)
+            examiner_response = (f"Задача _{escape_markdown(problem.name)}_ отмечена как несданная участником {participant.name} {participant.surname}. "
+                                f"Чтобы продолжить принимать задачи, используй команду /free")
+            bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
+        elif queue_entry.status == QueueStatus.CANCELED:
+            participant_response = ("Сдача задачи отменена. Ты больше не в очереди\n"
+                                    f"Олимпиада завершена, можешь отправляться на заслуженный отдых")
+            bot.send_message(participant.tg_id, participant_response)
+            examiner_response = (f"Сдача задачи _{escape_markdown(problem.name)}_ участником {participant.name} {participant.surname} отменена. "
+                                f"Чтобы продолжить принимать задачи, используй команду /free")
+            bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
+        elif queue_entry.status == QueueStatus.SUCCESS:
+            participant_response = (f"Задача {problem_number} _{escape_markdown(problem.name)}_ принята! Поздравляем\n"
+                                    f"Олимпиада завершена, можешь отправляться на заслуженный отдых")
+            bot.send_message(participant.tg_id, participant_response)
+            examiner_response = (f"Задача _{escape_markdown(problem.name)}_ отмечена как успешно сданная участником {participant.name} {participant.surname}. "
+                                f"Чтобы продолжить принимать задачи, используй команду /free")
+            bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
+        if not current_olymp.unhandled_queue_left():
+            finish_olymp()
         return
+    
     participant_response = (f"Задачу {problem_number} _{escape_markdown(problem.name)}_ у тебя примет {examiner.name} {examiner.surname}.\n"
                             f"Ссылка: {examiner.conference_link}")
     bot.send_message(participant.tg_id, participant_response, reply_markup=quick_markup({'Принимающий не пришёл': {'callback_data': 'examiner_didnt_come'}}))
@@ -562,7 +597,10 @@ def examiner_buttons_callback(message: Message):
     announce_queue_entry(queue_entry)
 
 
-@bot.callback_query_handler(lambda callback_query: callback_query.data.startswith('examiner_didnt_come'))
+@bot.callback_query_handler(
+    lambda callback_query: callback_query.data.startswith('examiner_didnt_come'), 
+    olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE]
+)
 def examiner_didnt_come_handler(callback_query: CallbackQuery):
     data = callback_query.data
     message = callback_query.message
