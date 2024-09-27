@@ -7,7 +7,7 @@ import telebot
 from telebot.types import Message, CallbackQuery, InputFile, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
 from telebot.formatting import escape_markdown
 from telebot.custom_filters import SimpleCustomFilter, AdvancedCustomFilter
-from telebot.util import quick_markup
+from telebot.util import quick_markup, extract_command
 from olymp import Olymp, OlympStatus
 from users import User, OlympMember, Participant, Examiner
 from problem import Problem, ProblemBlock, BlockType
@@ -88,7 +88,10 @@ bot.add_custom_filter(DiscussingExaminerFilter())
 current_olymp = Olymp.current()
 
 
-@bot.message_handler(commands=['start', 'authenticate'])
+@bot.message_handler(
+    commands=['start', 'authenticate'], 
+    olymp_statuses = [None, OlympStatus.TBA, OlympStatus.REGISTRATION, OlympStatus.CONTEST]
+)
 def send_welcome(message: Message):
     if not current_olymp or current_olymp.status == OlympStatus.TBA:
         response = ("Привет!\n"
@@ -110,14 +113,20 @@ def send_welcome(message: Message):
                     + "!\n" + member.display_data())
         bot.send_message(message.chat.id, response)
         return
-    tg_handle = message.from_user.username
+    tg_handle = message.from_user.username or message.from_user.id
     new_member: Participant | Examiner | None = \
         Participant.from_tg_handle(tg_handle, olymp_id, no_error=True) or Examiner.from_tg_handle(tg_handle, olymp_id, no_error=True)
     user_old_handle = User.from_tg_id(tg_id, no_error=True)
     if user_old_handle and new_member:
+        if user_old_handle.tg_handle.isnumeric():
+            participant_reply = f"У тебя раньше не было хэндла в Телеграме?"
+        elif new_member.tg_handle.isnumeric():
+            participant_reply = f"У тебя раньше в Телеграме был хэндл @{user_old_handle.tg_handle}?"
+        else:
+            participant_reply = f"У тебя поменялся хэндл в Телеграме с @{user_old_handle.tg_handle} на @{new_member.tg_handle}?"
         bot.send_message(
             message.chat.id, 
-            f"У тебя поменялся хэндл в Телеграме с @{user_old_handle.tg_handle} на @{new_member.tg_handle}?",
+            participant_reply,
             reply_markup=quick_markup(
                 {'Да': {'callback_data': 'handle_changed_yes'}, 'Нет': {'callback_data': 'handle_changed_no'}},
                 row_width=2
@@ -131,6 +140,14 @@ def send_welcome(message: Message):
                     + ("участник" if isinstance(new_member, Participant) else "принимающий")
                     + "!\n" + new_member.display_data())
         bot.send_message(message.chat.id, response)
+        if current_olymp.status != OlympStatus.CONTEST or isinstance(new_member, Examiner):
+            return
+        for problem_block_number in range(1, new_member.last_block_number+1):
+            problem_block = new_member.problem_block_from_number(problem_block_number)
+            bot.send_document(
+                message.chat.id,
+                InputFile(problem_block.path, f"Блок_{problem_block_number}.pdf")
+            )
         return
     
     bot.send_message(message.chat.id, f"Пользователь не найден. Если вы регистрировались на олимпиаду, напишите {OWNER_HANDLE}")
@@ -418,7 +435,7 @@ def examiner_chooses_problem(message: Message):
 @bot.message_handler(commands=['free', 'busy'], roles=['examiner'], olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE], discussing_examiner=False)
 def examiner_busyness_status(message: Message):
     examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
-    command = telebot.util.extract_command(message.text)
+    command = extract_command(message.text)
     if command == 'free' and not examiner.is_busy:
         raise UserError("Ты уже свободен(-на). Если хочешь отметить, что ты занят(-а), используй команду /busy")
     if command == 'busy' and examiner.is_busy:
@@ -624,6 +641,59 @@ def leave_queue(message: Message):
         raise UserError("Нельзя покинуть очередь во время сдачи задач")
     queue_entry.status = QueueStatus.CANCELED
     announce_queue_entry(queue_entry)
+
+
+@bot.message_handler(commands=['give_out_second_block', 'give_out_third_block'], roles=['owner'], olymp_statuses=[OlympStatus.CONTEST])
+def give_out_problem_block(message: Message):
+    command = extract_command(message.text)
+    new_problem_block_number = 2 if command == 'give_out_second_block' else 3
+    participants = current_olymp.get_participants()
+    issues = 0
+    receivers = 0
+    for p in participants:
+        last_block_number = p.last_block_number
+        if last_block_number < new_problem_block_number - 1:
+            issues += 1
+        if last_block_number < new_problem_block_number:
+            receivers += 1
+            new_problem_block = p.give_next_problem_block()
+            if p.tg_id:
+                participant_reply = (f"Тебе выдан {'второй' if last_block_number + 1 == 2 else 'третий'} блок задач. "
+                                     f"Теперь можешь сдавать и их!\n"
+                                     f"Чтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`")
+                bot.send_document(
+                    p.tg_id,
+                    InputFile(new_problem_block.path, f"Блок_{last_block_number + 1}.pdf"),
+                    caption=participant_reply
+                )
+    owner_reply = (f"{'Второй' if new_problem_block_number == 2 else 'Третий'} блок задач выдан "
+                   f"{receivers} {decline(receivers, 'участник', ('у', 'ам', 'ам'))}")
+    if issues:
+        owner_reply += f"\n⚠️ У {issues} {decline(issues, 'участник', ('а', 'ов', 'ов'))} не было предыдущего блока!"
+    bot.send_message(message.chat.id, owner_reply)
+
+
+@bot.message_handler(commands=['give_second_block', 'give_third_block'], roles=['owner'], olymp_statuses=[OlympStatus.CONTEST])
+def give_out_problem_block(message: Message):
+    command = extract_command(message.text)
+    new_problem_block_number = 2 if command == 'give_second_block' else 3
+    arg = get_arg(message, "Необходимо указать хэндл участника")
+    participant: Participant = Participant.from_tg_handle(arg, current_olymp.id)
+    if participant.last_block_number != new_problem_block_number - 1:
+        raise UserError(f"Последний блок участника {participant.name} {participant.surname} — блок {participant.last_block_number}")
+    problem_block = participant.give_next_problem_block()
+    participant_reply = (f"Тебе выдан {'второй' if participant.last_block_number == 2 else 'третий'} блок задач. "
+                         f"Теперь можешь сдавать и их!\n"
+                         f"Чтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`")
+    bot.send_document(
+        participant.tg_id,
+        InputFile(problem_block.path, f"Блок_{participant.last_block_number}.pdf"),
+        caption=participant_reply
+    )
+    bot.send_message(
+        message.chat.id,
+        f"{'Второй' if new_problem_block_number == 2 else 'Третий'} блок задач выдан участнику {participant.name} {participant.surname}"
+    )
 
 
 print("Запускаю бота...")

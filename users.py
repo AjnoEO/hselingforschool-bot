@@ -19,6 +19,8 @@ class User:
         self.__user_id: int = user_id
         self.__tg_id: int | None = tg_id
         self.__tg_handle: str = tg_handle.lower()
+        if self.__tg_handle.startswith("@"):
+            self.__tg_handle = self.__tg_handle[1:]
         self.__name: str = name
         self.__surname: str = surname
 
@@ -38,6 +40,8 @@ class User:
         Добавить пользователя в таблицу users
         """
         tg_handle = tg_handle.lower()
+        if tg_handle.startswith("@"):
+            tg_handle = tg_handle[1:]
         exists = value_exists("users", {"tg_handle": tg_handle})
         if exists and not ok_if_exists:
             raise ValueError(f"Пользователь @{tg_handle} уже есть в базе")
@@ -66,6 +70,8 @@ class User:
     ):
         if tg_handle:
             tg_handle = tg_handle.lower()
+            if tg_handle.startswith("@"):
+                tg_handle = tg_handle[1:]
         if tg_id:
             checked_column = "tg_id"
             given_value = tg_id
@@ -154,6 +160,9 @@ class User:
     def tg_handle(self): return self.__tg_handle
     @tg_handle.setter
     def tg_handle(self, value: str):
+        value = value.lower()
+        if value.startswith("@"):
+            value = value[1:]
         self.__set('tg_handle', value.lower())
         self.__tg_handle = value
     @property
