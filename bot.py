@@ -108,9 +108,11 @@ def send_welcome(message: Message):
     member: Participant | Examiner | None = \
         Participant.from_tg_id(tg_id, olymp_id, no_error=True) or Examiner.from_tg_id(tg_id, olymp_id, no_error=True)
     if member:
-        response = ("Ты уже авторизован как "
+        response = ("Ты уже авторизован(-а) как "
                     + ("участник" if isinstance(member, Participant) else "принимающий")
                     + "!\n" + member.display_data())
+        if isinstance(member, Examiner) and not current_olymp.status == OlympStatus.CONTEST:
+            response += "\nЧтобы выбрать задачи для приёма, используй команду /choose\_problems"
         bot.send_message(message.chat.id, response)
         return
     tg_handle = message.from_user.username or message.from_user.id
@@ -136,9 +138,11 @@ def send_welcome(message: Message):
     
     if new_member:
         new_member.tg_id = tg_id
-        response = ("Ты успешно авторизовался как "
+        response = ("Ты успешно авторизовался(-лась) как "
                     + ("участник" if isinstance(new_member, Participant) else "принимающий")
                     + "!\n" + new_member.display_data())
+        if isinstance(member, Examiner) and not current_olymp.status == OlympStatus.CONTEST:
+            response += "\nЧтобы выбрать задачи для приёма, используй команду /choose\_problems"
         bot.send_message(message.chat.id, response)
         if current_olymp.status != OlympStatus.CONTEST or isinstance(new_member, Examiner):
             return
@@ -150,7 +154,7 @@ def send_welcome(message: Message):
             )
         return
     
-    bot.send_message(message.chat.id, f"Пользователь не найден. Если вы регистрировались на олимпиаду, напишите {OWNER_HANDLE}")
+    bot.send_message(message.chat.id, f"Пользователь не найден. Если ты регистрировался(-лась) на олимпиаду, напишите {OWNER_HANDLE}")
 
 
 @bot.callback_query_handler(lambda callback_query: callback_query.data.startswith('handle_changed_'))
@@ -169,9 +173,11 @@ def handle_change_handler(callback_query: CallbackQuery):
         member: Participant | Examiner | None = \
             Participant.from_user_id(user_id, olymp_id, no_error=True) or Examiner.from_user_id(user_id, olymp_id, no_error=True)
         if member:
-            response = ("Ты успешно авторизовался как "
+            response = ("Ты успешно авторизовался(-лась) как "
                         + ("участник" if isinstance(member, Participant) else "принимающий")
                         + "!\n" + member.display_data())
+            if isinstance(member, Examiner) and current_olymp and not current_olymp.status == OlympStatus.CONTEST:
+                response += "\nЧтобы выбрать задачи для приёма, используй команду /choose\_problems"
             bot.send_message(message.chat.id, response)
             bot.answer_callback_query(callback_query.id)
             return
@@ -186,6 +192,8 @@ def olymp_reg_start(message: Message):
     if current_olymp.status != OlympStatus.TBA:
         raise UserError("Олимпиада уже идёт или завершилась")
     current_olymp.status = OlympStatus.REGISTRATION
+    participants = current_olymp.get_participants()
+    examiners = current_olymp.get_examiners()
     bot.send_message(message.chat.id, f"Регистрация на олимпиаду _{current_olymp.name}_ запущена")
 
 
