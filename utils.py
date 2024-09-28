@@ -8,6 +8,9 @@ from db import DATABASE
 
 class UserError(Exception):
     """Ошибки, вызванные неправильными действиями пользователей"""
+    def __init__(self, *args, reply_markup = None):
+        super().__init__(*args)
+        self.reply_markup = reply_markup
 
 def decline(numeral: int, stem: str, endings: tuple[str]):
     numeral = abs(numeral)

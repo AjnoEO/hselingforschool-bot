@@ -17,12 +17,17 @@ import pandas as pd
 from io import BytesIO
 
 
+PROMOTE_COMMANDS = False # Подсказывать ли команды участникам
+NO_EXAMINER_COMPLAINTS = True # Давать ли участникам возможность пожаловаться на то, что принимающий не пришёл
+
+
 create_update_db()
 
 
 class MyExceptionHandler(telebot.ExceptionHandler):
     def handle(self, exc: Exception):
         message = None
+        reply_markup = None
         tb = exc.__traceback__
         while (tb := tb.tb_next):
             # print(tb.tb_frame)
@@ -36,6 +41,7 @@ class MyExceptionHandler(telebot.ExceptionHandler):
         if isinstance(exc, UserError):
             error_message = "⚠️ Ошибка!\n" + str(exc)
             handled = True
+            reply_markup = exc.reply_markup
         else:
             traceback = exc.__traceback__
             while traceback.tb_next: traceback = traceback.tb_next
@@ -45,7 +51,7 @@ class MyExceptionHandler(telebot.ExceptionHandler):
                              f"`{exc.__class__.__name__} "
                              f"({filename}, строка {line_number}): {exc}`")
         error_message += f"\nЕсли тебе кажется, что это баг, сообщи {OWNER_HANDLE}"
-        bot.send_message(message.chat.id, error_message, reply_markup=ReplyKeyboardRemove())
+        bot.send_message(message.chat.id, error_message, reply_markup=reply_markup)
         return handled
 
 
@@ -57,6 +63,8 @@ class RolesFilter(AdvancedCustomFilter): # owner, examiner, participant
     def check(message: Message, roles: list[str]):
         if 'owner' in roles and message.from_user.id == OWNER_ID:
             return True
+        if not current_olymp:
+            return False
         if 'examiner' in roles and Examiner.from_tg_id(message.from_user.id, current_olymp.id, no_error=True):
             return True
         if 'participant' in roles and Participant.from_tg_id(message.from_user.id, current_olymp.id, no_error=True):
@@ -86,6 +94,19 @@ bot.add_custom_filter(OlympStatusFilter())
 bot.add_custom_filter(DiscussingExaminerFilter())
 
 current_olymp = Olymp.current()
+
+
+participant_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+participant_keyboard.add("Записаться в очередь")
+
+participant_keyboard_in_queue = ReplyKeyboardMarkup(resize_keyboard=True)
+participant_keyboard_in_queue.add("Покинуть очередь")
+
+def participant_keyboard_choose_problem(participant: Participant):
+    buttons = {f"{i+1}: {problem.name}": {'callback_data': f'join_queue_{i+1}'} 
+               for i, problem in enumerate(participant.problems())}
+    buttons["Отмена"] = {'callback_data': 'join_queue_cancel'}
+    return quick_markup(buttons, row_width=3)
 
 
 @bot.message_handler(
@@ -509,16 +530,21 @@ def announce_queue_entry(queue_entry: QueueEntry):
     if not queue_entry.examiner_id:
         if queue_entry.status == QueueStatus.WAITING:
             response = (f"Ты теперь в очереди на задачу {problem_number}: _{escape_markdown(problem.name)}_. "
-                        f"Свободных принимающих пока нет, но бот напишет тебе, когда подходящий принимающий освободится. "
-                        f"Чтобы покинуть очередь, используй команду /leave\_queue")
-            bot.send_message(participant.tg_id, response)
+                        f"Свободных принимающих пока нет, но бот напишет тебе, когда подходящий принимающий освободится")
+            if PROMOTE_COMMANDS:
+                response += f"\nЧтобы покинуть очередь, используй команду /leave\_queue"
+            bot.send_message(participant.tg_id, response, reply_markup=participant_keyboard_in_queue)
             return
         elif queue_entry.status == QueueStatus.CANCELED:
             if current_olymp.status == OlympStatus.CONTEST:
-                response = "Ты больше не в очереди. Чтобы записаться на сдачу задачи снова, используй команду `/queue <номер задачи>`"
+                response = "Ты больше не в очереди"
+                if PROMOTE_COMMANDS:
+                    response += ". Чтобы записаться на сдачу задачи снова, используй команду `/queue <номер задачи>`"
+                keyboard = participant_keyboard
             else:
                 response = "Ты больше не в очереди. Олимпиада завершена, можешь отправляться на заслуженный отдых"
-            bot.send_message(participant.tg_id, response)
+                keyboard = None
+            bot.send_message(participant.tg_id, response, reply_markup=keyboard)
             return
     
     examiner: Examiner = Examiner.from_id(queue_entry.examiner_id)
@@ -526,7 +552,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
     if queue_entry.status not in QueueStatus.active():
         new_problem_block = None
         if queue_entry.status == QueueStatus.FAIL:
-            participant_response = f"Задача {problem_number} _{escape_markdown(problem.name)}_ не принята"
+            participant_response = f"Задача {problem_number}: _{escape_markdown(problem.name)}_ не принята"
             if current_olymp.status == OlympStatus.CONTEST:
                 attempts = participant.attempts_left(problem)
                 participant_response += (f". У тебя {decline(attempts, 'остал', ('ась', 'ось', 'ось'))} "
@@ -541,7 +567,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
             examiner_response = (f"Сдача задачи _{escape_markdown(problem.name)}_ "
                                  f"участником {participant.name} {participant.surname} отменена")
         elif queue_entry.status == QueueStatus.SUCCESS:
-            participant_response = f"Задача {problem_number} _{escape_markdown(problem.name)}_ принята! Поздравляем"
+            participant_response = f"Задача {problem_number}: _{escape_markdown(problem.name)}_ принята! Поздравляем"
             if current_olymp.status == OlympStatus.CONTEST and participant.should_get_new_problem(problem):
                 new_problem_block = participant.give_next_problem_block()
                 participant_response += (f"\nЗа решение этой задачи тебе полагается {participant.last_block_number} блок задач. "
@@ -549,7 +575,11 @@ def announce_queue_entry(queue_entry: QueueEntry):
             examiner_response = (f"Задача _{escape_markdown(problem.name)}_ отмечена "
                                  f"как успешно сданная участником {participant.name} {participant.surname}")
         if current_olymp.status == OlympStatus.CONTEST:
-            participant_response += "\nЧтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`"
+            if PROMOTE_COMMANDS:
+                participant_response += "\nЧтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`"
+            keyboard = participant_keyboard
+        else:
+            keyboard = None
         unhandled_queue_left = current_olymp.unhandled_queue_left()
         if current_olymp.status == OlympStatus.CONTEST or unhandled_queue_left:
             examiner_response += "\nЧтобы продолжить принимать задачи, используй команду /free"
@@ -557,18 +587,24 @@ def announce_queue_entry(queue_entry: QueueEntry):
             bot.send_document(
                 participant.tg_id, 
                 document=InputFile(new_problem_block.path, f"Блок_{participant.last_block_number}.pdf"),
-                caption=participant_response
+                caption=participant_response,
+                reply_markup=keyboard
             )
         else:
-            bot.send_message(participant.tg_id, participant_response)
+            bot.send_message(participant.tg_id, participant_response, reply_markup=keyboard)
         bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
         if current_olymp.status == OlympStatus.QUEUE and not unhandled_queue_left:
             finish_olymp()
         return
     
-    participant_response = (f"Задачу {problem_number} _{escape_markdown(problem.name)}_ у тебя примет {examiner.name} {examiner.surname}.\n"
+    participant_response = (f"Задачу {problem_number}: _{escape_markdown(problem.name)}_ "
+                            f"у тебя примет {examiner.name} {examiner.surname}.\n"
                             f"Ссылка: {examiner.conference_link}")
-    bot.send_message(participant.tg_id, participant_response, reply_markup=quick_markup({'Принимающий не пришёл': {'callback_data': 'examiner_didnt_come'}}))
+    bot.send_message(
+        participant.tg_id, 
+        participant_response, 
+        reply_markup=quick_markup({'Принимающий не пришёл': {'callback_data': 'examiner_didnt_come'}} if NO_EXAMINER_COMPLAINTS else None)
+    )
     examiner_response = (f"К тебе идёт сдавать задачу _{escape_markdown(problem.name)}_ "
                          f"участник {participant.name} {participant.surname} ({participant.grade} класс). "
                          f"Ты можешь принять или отклонить решение, а также отменить сдачу (например, если участник "
@@ -598,9 +634,10 @@ def withdraw_examiner(message: Message):
         problem = Problem.from_id(queue_entry.problem_id)
         problem_number = participant.get_problem_number(problem)
         participant_response = (f"Вернули тебя в начало очереди на задачу {problem_number}: _{escape_markdown(problem.name)}_. "
-                                f"Свободных принимающих пока нет, но бот напишет тебе, когда подходящий принимающий освободится. "
-                                f"Чтобы покинуть очередь, используй команду /leave\_queue")
-        bot.send_message(participant.tg_id, participant_response)
+                                f"Свободных принимающих пока нет, но бот напишет тебе, когда подходящий принимающий освободится")
+        if PROMOTE_COMMANDS:
+            participant_response += f"Чтобы покинуть очередь, используй команду /leave\_queue"
+        bot.send_message(participant.tg_id, participant_response, reply_markup=participant_keyboard_in_queue)
 
 
 @bot.message_handler(discussing_examiner = True)
@@ -620,6 +657,9 @@ def examiner_buttons_callback(message: Message):
     olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE]
 )
 def examiner_didnt_come_handler(callback_query: CallbackQuery):
+    if not NO_EXAMINER_COMPLAINTS:
+        bot.answer_callback_query(callback_query.id)
+        return
     data = callback_query.data
     message = callback_query.message
     if data == 'examiner_didnt_come_cancel':
@@ -662,51 +702,78 @@ def examiner_didnt_come_handler(callback_query: CallbackQuery):
         problem = Problem.from_id(queue_entry.problem_id)
         problem_number = participant.get_problem_number(problem)
         participant_response = (f"Вернули тебя в начало очереди на задачу {problem_number}: _{escape_markdown(problem.name)}_. "
-                                f"Свободных принимающих пока нет, но бот напишет тебе, когда подходящий принимающий освободится. "
-                                f"Чтобы покинуть очередь, используй команду /leave\_queue")
-        bot.send_message(participant.tg_id, participant_response)
+                                f"Свободных принимающих пока нет, но бот напишет тебе, когда подходящий принимающий освободится")
+        if PROMOTE_COMMANDS:
+            participant_response += f"Чтобы покинуть очередь, используй команду /leave\_queue"
+        bot.send_message(participant.tg_id, participant_response, reply_markup=participant_keyboard_in_queue)
 
 
-@bot.message_handler(commands=['queue'], roles=['participant'], olymp_statuses=[OlympStatus.CONTEST])
-def join_queue(message: Message):
+@bot.message_handler(regexp=r'(/queue( \d+)?|Записаться в очередь)', roles=['participant'], olymp_statuses=[OlympStatus.CONTEST])
+def queue(message: Message):
     participant: Participant = Participant.from_tg_id(message.from_user.id, current_olymp.id)
     if participant.queue_entry:
         problem = Problem.from_id(participant.queue_entry.problem_id)
         problem_number = participant.get_problem_number(problem)
-        raise UserError(f"Ты уже в очереди на задачу {problem_number}: _{problem.name}_. Чтобы покинуть очередь, используй команду /leave\_queue")
-    args = get_arg(message, "Необходимо указать номер задачи")
-    if not args.isnumeric():
-        raise UserError("Необходимо указать номер задачи")
-    problem_number = int(args)
+        error_message = f"Ты уже в очереди на задачу {problem_number}: _{problem.name}_"
+        if PROMOTE_COMMANDS:
+            error_message += ". Чтобы покинуть очередь, используй команду /leave\_queue"
+        raise UserError(error_message, reply_markup=participant_keyboard_in_queue)
+    if match := re.match(r"/queue (\d+)", message.text):
+        match: re.Match
+        problem_number = int(match.group(1))
+        join_queue(participant, problem_number)
+        return
+    bot.send_message(message.chat.id, "Выбери задачу для сдачи", reply_markup=participant_keyboard_choose_problem(participant))
+
+
+@bot.callback_query_handler(lambda callback_query: callback_query.data.startwith('join_queue_'))
+def join_queue_handler(callback_query: CallbackQuery):
+    message = callback_query.message
+    bot.delete_message(message.chat.id, message.id)
+    if callback_query.data.endswith('_cancel'):
+        return
+    participant: Participant = Participant.from_tg_id(callback_query.from_user.id)
+    problem_number = int(callback_query.data[len('join_queue_'):])
+    join_queue(participant, problem_number)
+
+
+def join_queue(participant: Participant, problem_number: int):
     problem = participant.problem_from_number(problem_number)
     if participant.attempts_left(problem) <= 0:
-        raise UserError(f"У тебя не осталось попыток чтобы сдать задачу {problem_number}: _{escape_markdown(problem.name)}_… Стоит заняться другими задачами")
+        raise UserError(f"У тебя не осталось попыток, чтобы сдать задачу {problem_number}: _{escape_markdown(problem.name)}_… "
+                        f"Стоит заняться другими задачами",
+                        reply_markup=participant_keyboard)
     if participant.solved(problem):
-        raise UserError(f"Задача {problem_number}: _{escape_markdown(problem.name)}_ уже сдана! Займись другими задачами")
+        raise UserError(f"Задача {problem_number}: _{escape_markdown(problem.name)}_ уже сдана! Займись другими задачами",
+                        reply_markup=participant_keyboard)
     queue_entry = participant.join_queue(problem)
     announce_queue_entry(queue_entry)
 
 
-@bot.message_handler(commands=['leave_queue'], roles=['participant'], olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE])
+@bot.message_handler(regexp=r'(/leave_queue|Покинуть очередь)', roles=['participant'], olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE])
 def leave_queue(message: Message):
     participant: Participant = Participant.from_tg_id(message.from_user.id, current_olymp.id)
-    if not participant.queue_entry:
-        raise UserError("Ты уже не в очереди. Чтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`")
     queue_entry = participant.queue_entry
+    if not queue_entry:
+        error_message = "Ты уже не в очереди"
+        if PROMOTE_COMMANDS:
+            error_message += ". Чтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`"
+        raise UserError(error_message)
     if queue_entry.status != QueueStatus.WAITING:
         raise UserError("Нельзя покинуть очередь во время сдачи задач")
     if current_olymp.status == OlympStatus.QUEUE:
-        bot.send_message(
-            message.chat.id,
-            "Олимпиада завершена — если ты покинешь очередь, то больше не сможешь сдавать задачи",
-            reply_markup=quick_markup({
-                'Я понимаю. Покинуть очередь': {'callback_data': 'leave_queue_confirm'},
-                'Отмена': {'callback_data': 'leave_queue_cancel'}
-            })
-        )
-        return
-    queue_entry.status = QueueStatus.CANCELED
-    announce_queue_entry(queue_entry)
+        response = "Олимпиада завершена — если ты покинешь очередь, то больше не сможешь сдавать задачи"
+    else:
+        response = ("Осторожно! Если ты покинешь очередь, то потеряешь своё место в ней. "
+                    "При повторной записи на задачу ты окажешься в конце")
+    bot.send_message(
+        message.chat.id,
+        response,
+        reply_markup=quick_markup({
+            'Я понимаю. Покинуть очередь': {'callback_data': 'leave_queue_confirm'},
+            'Отмена': {'callback_data': 'leave_queue_cancel'}
+        })
+    )
 
 
 @bot.callback_query_handler(lambda callback_query: callback_query.data.startswith('leave_queue_'), olymp_statuses=[OlympStatus.QUEUE])
@@ -739,8 +806,9 @@ def give_out_problem_block(message: Message):
             new_problem_block = p.give_next_problem_block()
             if p.tg_id:
                 participant_reply = (f"Тебе выдан {'второй' if last_block_number + 1 == 2 else 'третий'} блок задач. "
-                                     f"Теперь можешь сдавать и их!\n"
-                                     f"Чтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`")
+                                     f"Теперь можешь сдавать и их!")
+                if PROMOTE_COMMANDS:
+                    participant_reply += f"\nЧтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`"
                 bot.send_document(
                     p.tg_id,
                     InputFile(new_problem_block.path, f"Блок_{last_block_number + 1}.pdf"),
@@ -754,7 +822,7 @@ def give_out_problem_block(message: Message):
 
 
 @bot.message_handler(commands=['give_second_block', 'give_third_block'], roles=['owner'], olymp_statuses=[OlympStatus.CONTEST])
-def give_out_problem_block(message: Message):
+def give_problem_block(message: Message):
     command = extract_command(message.text)
     new_problem_block_number = 2 if command == 'give_second_block' else 3
     arg = get_arg(message, "Необходимо указать хэндл участника")
@@ -763,8 +831,9 @@ def give_out_problem_block(message: Message):
         raise UserError(f"Последний блок участника {participant.name} {participant.surname} — блок {participant.last_block_number}")
     problem_block = participant.give_next_problem_block()
     participant_reply = (f"Тебе выдан {'второй' if participant.last_block_number == 2 else 'третий'} блок задач. "
-                         f"Теперь можешь сдавать и их!\n"
-                         f"Чтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`")
+                         f"Теперь можешь сдавать и их!")
+    if PROMOTE_COMMANDS:
+        participant_reply += f"\nЧтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`"
     bot.send_document(
         participant.tg_id,
         InputFile(problem_block.path, f"Блок_{participant.last_block_number}.pdf"),

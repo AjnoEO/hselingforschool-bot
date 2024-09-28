@@ -453,6 +453,13 @@ class Participant(OlympMember):
             raise ValueError("Участник уже получил все блоки задач")
         self.last_block_number += 1
         return self.last_block
+    
+    def problems(self):
+        problem_list: list[Problem] = []
+        for problem_block_number in range(1, self.last_block_number + 1):
+            problem_block = self.problem_block_from_number(problem_block_number)
+            problem_list += problem_block.problems
+        return problem_list
 
     def join_queue(self, problem: Problem | int):
         if not self.has_problem(problem):
