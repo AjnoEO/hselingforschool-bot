@@ -340,7 +340,7 @@ class Participant(OlympMember):
             user_id = user
         exists = value_exists("participants", {"user_id": user_id, "olymp_id": olymp_id})
         if exists:
-            raise ValueError(f"Пользователь {user_id} уже участник олимпиады {olymp_id}")
+            raise UserError(f"Пользователь {user_id} уже участник олимпиады {olymp_id}")
         q = (f"INSERT INTO participants(user_id, olymp_id, grade"
              f"{(', last_block_number' if last_block_number else '')}) VALUES "
              f"(?, ?, ?{', ?' if last_block_number else ''})")
@@ -569,7 +569,7 @@ class Examiner(OlympMember):
             user_id = user
         exists = value_exists("examiners", {"user_id": user_id, "olymp_id": olymp_id})
         if exists:
-            raise ValueError(f"Пользователь {user_id} уже проверяющий в олимпиаде {olymp_id}")
+            raise UserError(f"Пользователь {user_id} уже проверяющий в олимпиаде {olymp_id}")
         cursor.execute(
             "INSERT INTO examiners(user_id, olymp_id, conference_link, busyness_level, is_busy) VALUES (?, ?, ?, ?, ?)", 
             (user_id, olymp_id, conference_link, busyness_level, int(is_busy))

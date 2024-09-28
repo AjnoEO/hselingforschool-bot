@@ -312,6 +312,37 @@ def upload_examiners(message: Message):
     upload_members(message, ["name", "surname", "tg_handle", "conference_link"], Examiner, 'принимающ', ('ий', 'их', 'их'))
 
 
+@bot.message_handler(commands=['add_participant'], roles=['owner'])
+def add_participant(message: Message):
+    if not current_olymp:
+        raise UserError("Нет текущей олимпиады")
+    tg_handle, name, surname, *numbers = get_n_args(
+        message, 4, 5, "Необходимо указать Телеграм-хэндл, имя, фамилию, класс и, при необходимости, последний блок участника"
+    )
+    grade = int(numbers[0])
+    last_block_number = int(numbers[1]) if len(numbers) > 1 else None
+    participant: Participant = Participant.create_as_new_user(
+        tg_handle, name, surname, grade, current_olymp.id,
+        last_block_number=last_block_number, ok_if_user_exists=True
+    )
+    bot.send_message(message.chat.id, f"{participant.name} {participant.surname} добавлен(-а) в список участников")
+
+
+@bot.message_handler(commands=['add_examiner'], roles=['owner'])
+def add_examiner(message: Message):
+    if not current_olymp:
+        raise UserError("Нет текущей олимпиады")
+    tg_handle, name, surname, conference_link, problems = get_n_args(
+        message, 5, 5, "Необходимо указать Телеграм-хэндл, имя, фамилию, ссылку на конференцию и задачи принимающего"
+    )
+    problems = list(map(int, problems.split())) if problems[0] != '0' else None
+    examiner: Examiner = Examiner.create_as_new_user(
+        tg_handle, name, surname, conference_link, current_olymp.id,
+        problems = problems, ok_if_user_exists = True
+    )
+    bot.send_message(message.chat.id, f"{examiner.name} {examiner.surname} добавлен(-а) в список принимающих")
+
+
 @bot.message_handler(commands=['olymp_info'], roles=['owner'])
 def olymp_info(message: Message):
     if not current_olymp:
@@ -336,7 +367,7 @@ def problem_create(message: Message):
 def problem_rename(message: Message):
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
-    id, name = tuple(get_n_args(message, 2, 2, "Необходимо указать ID задачи и новое название"))
+    id, name = get_n_args(message, 2, 2, "Необходимо указать ID задачи и новое название")
     problem = Problem.from_id(int(id))
     if problem.olymp_id != current_olymp.id:
         raise UserError("Задача не относится к текущей олимпиаде")
