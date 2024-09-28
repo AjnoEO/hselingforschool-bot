@@ -215,6 +215,7 @@ def olymp_reg_start(message: Message):
     current_olymp.status = OlympStatus.REGISTRATION
     participants = current_olymp.get_participants()
     examiners = current_olymp.get_examiners()
+    # TODO: Рассылка уже зарегистрированным участникам и принимающим
     bot.send_message(message.chat.id, f"Регистрация на олимпиаду _{current_olymp.name}_ запущена")
 
 
@@ -543,8 +544,10 @@ def announce_queue_entry(queue_entry: QueueEntry):
                 keyboard = participant_keyboard
             else:
                 response = "Ты больше не в очереди. Олимпиада завершена, можешь отправляться на заслуженный отдых"
-                keyboard = None
+                keyboard = ReplyKeyboardRemove()
             bot.send_message(participant.tg_id, response, reply_markup=keyboard)
+            if current_olymp.status == OlympStatus.QUEUE and not current_olymp.unhandled_queue_left():
+                finish_olymp()
             return
     
     examiner: Examiner = Examiner.from_id(queue_entry.examiner_id)
@@ -579,7 +582,8 @@ def announce_queue_entry(queue_entry: QueueEntry):
                 participant_response += "\nЧтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`"
             keyboard = participant_keyboard
         else:
-            keyboard = None
+            participant_response += "\nОлимпиада завершена, можешь отправляться на заслуженный отдых"
+            keyboard = ReplyKeyboardRemove()
         unhandled_queue_left = current_olymp.unhandled_queue_left()
         if current_olymp.status == OlympStatus.CONTEST or unhandled_queue_left:
             examiner_response += "\nЧтобы продолжить принимать задачи, используй команду /free"
@@ -726,13 +730,23 @@ def queue(message: Message):
     bot.send_message(message.chat.id, "Выбери задачу для сдачи", reply_markup=participant_keyboard_choose_problem(participant))
 
 
-@bot.callback_query_handler(lambda callback_query: callback_query.data.startwith('join_queue_'))
+@bot.callback_query_handler(
+    lambda callback_query: callback_query.data.startswith('join_queue_'),
+    olymp_statuses=[OlympStatus.CONTEST])
 def join_queue_handler(callback_query: CallbackQuery):
     message = callback_query.message
     bot.delete_message(message.chat.id, message.id)
     if callback_query.data.endswith('_cancel'):
         return
-    participant: Participant = Participant.from_tg_id(callback_query.from_user.id)
+    participant: Participant = Participant.from_tg_id(callback_query.from_user.id, current_olymp.id)
+    queue_entry = participant.queue_entry
+    if queue_entry:
+        problem = Problem.from_id(queue_entry.problem_id)
+        problem_number = participant.get_problem_number(problem)
+        error_message = f"Ты уже в очереди на задачу {problem_number}: _{problem.name}_"
+        if PROMOTE_COMMANDS:
+            error_message += ". Чтобы покинуть очередь, используй команду /leave\_queue"
+        raise UserError(error_message, reply_markup=participant_keyboard_in_queue)
     problem_number = int(callback_query.data[len('join_queue_'):])
     join_queue(participant, problem_number)
 
@@ -758,7 +772,7 @@ def leave_queue(message: Message):
         error_message = "Ты уже не в очереди"
         if PROMOTE_COMMANDS:
             error_message += ". Чтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`"
-        raise UserError(error_message)
+        raise UserError(error_message, reply_markup=participant_keyboard_in_queue)
     if queue_entry.status != QueueStatus.WAITING:
         raise UserError("Нельзя покинуть очередь во время сдачи задач")
     if current_olymp.status == OlympStatus.QUEUE:
@@ -770,13 +784,16 @@ def leave_queue(message: Message):
         message.chat.id,
         response,
         reply_markup=quick_markup({
-            'Я понимаю. Покинуть очередь': {'callback_data': 'leave_queue_confirm'},
+            'Покинуть очередь': {'callback_data': 'leave_queue_confirm'},
             'Отмена': {'callback_data': 'leave_queue_cancel'}
         })
     )
 
 
-@bot.callback_query_handler(lambda callback_query: callback_query.data.startswith('leave_queue_'), olymp_statuses=[OlympStatus.QUEUE])
+@bot.callback_query_handler(
+    lambda callback_query: callback_query.data.startswith('leave_queue_'), 
+    olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE]
+)
 def leave_queue_handler(callback_query: CallbackQuery):
     confirm = callback_query.data.endswith('_confirm')
     message = callback_query.message
@@ -784,6 +801,11 @@ def leave_queue_handler(callback_query: CallbackQuery):
     if confirm:
         participant: Participant = Participant.from_tg_id(callback_query.from_user.id, current_olymp.id)
         queue_entry = participant.queue_entry
+        if not queue_entry:
+            error_message = "Ты уже не в очереди"
+            if PROMOTE_COMMANDS:
+                error_message += ". Чтобы записаться в очередь, используй команду `/queue <номер задачи>`"
+            raise UserError(error_message, reply_markup=participant_keyboard)
         if queue_entry.status != QueueStatus.WAITING:
             raise UserError("Нельзя покинуть очередь во время сдачи задач")
         queue_entry.status = QueueStatus.CANCELED

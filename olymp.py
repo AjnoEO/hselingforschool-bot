@@ -67,7 +67,7 @@ class Olymp:
         with sqlite3.connect(DATABASE) as conn:
             cur = conn.cursor()
             q = (f"SELECT EXISTS(SELECT 1 FROM queue WHERE olymp_id = ?"
-                 f"AND status NOT IN ({','.join(map(str, QueueStatus.active(as_numbers=True)))}))")
+                 f"AND status IN ({','.join(map(str, QueueStatus.active(as_numbers=True)))}))")
             cur.execute(q, (self.id,))
             result = cur.fetchone()
             return bool(result[0])
