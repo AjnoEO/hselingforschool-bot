@@ -1,3 +1,4 @@
+import os
 from enums import BlockType
 import sqlite3
 from db import DATABASE
@@ -185,6 +186,19 @@ class ProblemBlock:
         cursor.connection.commit()
         created_id = cursor.lastrowid
         return cls(created_id, olymp_id, problems, block_type, path)
+    
+
+    def delete_file(self):
+        if not self.path:
+            raise UserError("Файла уже нет")
+        os.remove(self.path)
+        self.path = None
+
+    @provide_cursor
+    def delete(self, *, cursor: sqlite3.Cursor | None = None):
+        self.delete_file()
+        cursor.execute("DELETE FROM problem_blocks WHERE id = ?", (self.id,))
+
 
     def __set(self, column: str, value):
         update_in_table("problem_blocks", column, value, "id", self.__id)

@@ -652,6 +652,47 @@ def problem_block_create(message: Message):
     bot.send_message(message.chat.id, response)
 
 
+@bot.message_handler(commands=['problem_block_delete'], roles=['owner'])
+def problem_block_delete(message: Message):
+    if not current_olymp:
+        raise UserError("Нет текущей олимпиады")
+    arg = get_arg(message, "Необходимо указать ID или тип блока")
+    if re.match(r"^(JUNIOR|SENIOR)_[123]$", arg):
+        block_type = BlockType[arg]
+        problem_block = ProblemBlock.from_block_type(current_olymp.id, block_type)
+    elif arg.isnumeric():
+        id = int(arg)
+        problem_block = ProblemBlock.from_id(id)
+    if problem_block.olymp_id != current_olymp.id:
+        raise UserError("Блок задач не относится к текущей олимпиаде")
+    problem_block.id
+    response = f"Блок задач <code>{problem_block.id}</code>"
+    if problem_block.block_type:
+        response += f" ({problem_block.block_type})"
+    response += " будет удалён безвозвратно. Ты уверен?"
+    bot.send_message(
+        message.chat.id, 
+        response, 
+        reply_markup=quick_markup({
+            'Да': {'callback_data': f'delete_block_{problem_block.id}'},
+            'Нет': {'callback_data': 'delete_block_cancel'}
+        })
+    )
+
+
+@bot.callback_query_handler(lambda callback_query: callback_query.data.startswith('delete_block_'))
+def delete_block_handler(callback_query: CallbackQuery):
+    message = callback_query.message
+    bot.delete_message(message.chat.id, message.id)
+    if callback_query.data.endswith('_cancel'):
+        bot.send_message(message.chat.id, "Действие отменено", reply_markup=participant_keyboard)
+        return
+    problem_block_id = int(callback_query.data[len('delete_block_'):])
+    problem_block = ProblemBlock.from_id(problem_block_id)
+    problem_block.delete()
+    bot.send_message(callback_query.from_user.id, f"Блок <code>{problem_block.id}</code> удалён")
+
+
 @bot.message_handler(commands=['choose_problems'], roles=['examiner'], olymp_statuses=[OlympStatus.REGISTRATION])
 def examiner_problems(message: Message):
     examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
