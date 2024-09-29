@@ -23,6 +23,8 @@ class QueueStatus(SqliteCompatibleEnum):
     SUCCESS = 3
     FAIL = 4
 
+    __DESCRIPTIONS = ["ожидание", "отмена", "обсуждение", "принято", "не принято"]
+
     @classmethod
     def active(cls, *, as_numbers: bool = False):
         active_statuses = [cls.WAITING, cls.DISCUSSING]
@@ -32,17 +34,16 @@ class QueueStatus(SqliteCompatibleEnum):
             return active_statuses
         
     @classmethod
-    def from_message(cls, message: str, no_error: bool = False):
-        match message.lower().strip():
-            case "принято":
-                return cls.SUCCESS
-            case "не принято":
-                return cls.FAIL
-            case "отмена":
-                return cls.CANCELED
+    def from_text(cls, text: str, no_error: bool = False):
+        text = text.lower().strip()
+        if text in cls.__DESCRIPTIONS:
+            return cls(cls.__DESCRIPTIONS.index(text))
         if no_error:
             return None
-        raise ValueError(f"Неизвестный статус сдачи: {message}")
+        raise ValueError(f"Неизвестный статус сдачи: {text}")
+
+    def __str__(self) -> str:
+        return self.__DESCRIPTIONS[self.value].capitalize()
 
 
 class BlockType(SqliteCompatibleEnum):

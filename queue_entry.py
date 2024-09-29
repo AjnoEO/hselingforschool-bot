@@ -1,7 +1,7 @@
 import sqlite3
 from enums import QueueStatus
 from db import DATABASE
-from utils import update_in_table
+from utils import update_in_table, UserError
 
 class QueueEntry:
     def __init__(
@@ -19,6 +19,16 @@ class QueueEntry:
         self.__problem_id: int = problem_id
         self.__status: QueueStatus = QueueStatus(status) if not isinstance(status, QueueStatus) else status
         self.__examiner_id: int | None = examiner_id
+
+    @classmethod
+    def from_id(cls, id: int):
+        with sqlite3.connect(DATABASE) as conn:
+            cur = conn.cursor()
+            cur.execute(f"SELECT * FROM queue WHERE id = ?", (id,))
+            fetch = cur.fetchone()
+            if fetch is None:
+                raise UserError("Запись не найдена")
+            return cls(*fetch)
 
     def look_for_examiner(self) -> int | None:
         """

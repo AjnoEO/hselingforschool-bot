@@ -3,6 +3,7 @@ import sqlite3
 from db import DATABASE
 from users import Participant, Examiner
 from problem import Problem
+from queue_entry import QueueEntry
 from utils import UserError, value_exists, provide_cursor, update_in_table
 
 
@@ -71,6 +72,34 @@ class Olymp:
             cur.execute(q, (self.id,))
             result = cur.fetchone()
             return bool(result[0])
+    
+    def last_queue_entries(
+        self, limit: int = 10, *, 
+        participant: Participant | int | None = None, 
+        examiner: Examiner | int | None = None,
+        problem: Problem | int | None = None
+    ):
+        if isinstance(participant, Participant): participant = participant.id
+        if isinstance(examiner, Examiner): examiner = examiner.id
+        if isinstance(problem, Problem): problem = problem.id
+        with sqlite3.connect(DATABASE) as conn:
+            cur = conn.cursor()
+            q = "SELECT * FROM queue WHERE olymp_id = ?"
+            params = [self.id]
+            if participant:
+                q += " AND participant_id = ?"
+                params.append(participant)
+            if examiner:
+                q += " AND examiner_id = ?"
+                params.append(examiner)
+            if problem:
+                q += " AND problem_id = ?"
+                params.append(problem)
+            q += f" ORDER BY id DESC LIMIT {limit}"
+            cur.execute(q, tuple(params))
+            results = cur.fetchall()
+            queue_entries = [QueueEntry(*fetch) for fetch in results]
+            return queue_entries[::-1]
 
 
     @provide_cursor

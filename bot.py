@@ -489,6 +489,82 @@ def olymp_info(message: Message):
     bot.send_message(message.chat.id, response)
 
 
+@bot.message_handler(
+    commands=['last_queue_entries'], 
+    roles=['owner'],
+    olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE, OlympStatus.RESULTS]
+)
+def last_queue_entries(message: Message):
+    syntax_hint = ("Синтаксис команды: `/last_queue_entries [participant=<tg-хэндл>] "
+                   "[examiner=<tg-хэндл>] [problem=<ID>] [limit=<ограничение>]`")
+    args = get_n_args(message, 0, 4, syntax_hint)
+    settings = {}
+    for arg in args:
+        match: re.Match = re.match(r"(participant|examiner|problem|limit)=(.+)", arg)
+        if not match:
+            raise UserError(syntax_hint)
+        key, value = match.groups()
+        if key in settings:
+            raise UserError(syntax_hint)
+        match key:
+            case 'limit': value = int(value)
+            case 'problem': value = Problem.from_id(value)
+            case 'participant': value = Participant.from_tg_handle(value, current_olymp.id)
+            case 'examiner': value = Examiner.from_tg_handle(value, current_olymp.id)
+        settings[key] = value
+    limit = settings.get('limit', 10)
+    chosen_participant: Participant | None = settings.get('participant')
+    chosen_examiner: Examiner | None = settings.get('examiner')
+    chosen_problem: Problem | None = settings.get('problem')
+    queue_entries = current_olymp.last_queue_entries(
+        limit,
+        participant=chosen_participant,
+        examiner=chosen_examiner,
+        problem=chosen_problem
+    )
+    response = f"Записи в очереди:\n"
+    for queue_entry in queue_entries:
+        participant: Participant = chosen_participant or Participant.from_id(queue_entry.participant_id)
+        examiner: Examiner | None = chosen_examiner or (Examiner.from_id(queue_entry.examiner_id) if queue_entry.examiner_id else None)
+        problem: Problem = chosen_problem or Problem.from_id(queue_entry.problem_id)
+        response += (f"ЗАПИСЬ `{queue_entry.id}`\n"
+                     f"- *Участник:* {participant.name} {participant.surname} ({participant.grade} класс)\n")
+        if examiner: 
+            response += f"- *Принимающий:* {examiner.name} {examiner.surname}\n"
+        else: response += "- Принимающий не назначен\n"
+        response += (f"- *Задача:* `{problem.id}` _{escape_markdown(problem.name)}_\n"
+                     f"- *Статус:* {queue_entry.status}\n")
+    bot.send_message(message.chat.id, response)
+    
+        
+
+@bot.message_handler(
+    commands=['update_queue_entry_status'],
+    roles=['owner'],
+    olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE, OlympStatus.RESULTS]
+)
+def update_queue_entry_status(message: Message):
+    id, status_text = get_n_args(message, 2, 2, "Необходимо указать ID записи и новый статус")
+    if not id.isnumeric(): raise UserError("Необходимо указать ID записи и новый статус")
+    id = int(id)
+    status = QueueStatus.from_text(status_text)
+    queue_entry = QueueEntry.from_id(id)
+    if queue_entry.olymp_id != current_olymp.id:
+        raise UserError("Запись не относится к текущей олимпиаде")
+    if queue_entry.status == QueueStatus.WAITING and status != QueueStatus.CANCELED:
+        raise UserError(f"Нельзя менять статус ожидания на что-либо кроме отмены")
+    if status == QueueStatus.WAITING:
+        raise UserError(f"Нельзя устанавливать статус ожидания")
+    if status == queue_entry.status:
+        raise UserError(f"Статус уже {status_text.capitalize()}")
+    queue_entry.status = status
+    announce_queue_entry(queue_entry)
+    if message.reply_to_message:
+        participant: Participant = Participant.from_id(queue_entry.participant_id)
+        bot.send_message(participant.tg_id, message.reply_to_message.text)
+
+
+
 @bot.message_handler(commands=['problem_create'], roles=['owner'])
 def problem_create(message: Message):
     if not current_olymp:
@@ -679,7 +755,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
             examiner_response = (f"Задача _{escape_markdown(problem.name)}_ отмечена "
                                  f"как несданная участником {participant.name} {participant.surname}")
         elif queue_entry.status == QueueStatus.CANCELED:
-            participant_response = "Сдача задачи отменена. Ты больше не в очереди"
+            participant_response = f"Сдача задачи {problem_number}: _{escape_markdown(problem.name)}_ отменена. Ты больше не в очереди"
             if current_olymp.status == OlympStatus.CONTEST:
                 participant_response += ". Попытка не потрачена"
             examiner_response = (f"Сдача задачи _{escape_markdown(problem.name)}_ "
@@ -759,10 +835,10 @@ def withdraw_examiner(message: Message):
         bot.send_message(participant.tg_id, participant_response, reply_markup=participant_keyboard_in_queue)
 
 
-@bot.message_handler(discussing_examiner = True)
+@bot.message_handler(discussing_examiner=True)
 def examiner_buttons_callback(message: Message):
-    result_status = QueueStatus.from_message(message.text, no_error = True)
-    if not result_status:
+    result_status = QueueStatus.from_text(message.text, no_error = True)
+    if not result_status or result_status in QueueStatus.active():
         bot.send_message(message.chat.id, "Выбери результат сдачи на клавиатуре")
         return
     examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
@@ -842,8 +918,9 @@ def queue(message: Message):
         problem_number = int(match.group(1))
         join_queue(participant, problem_number)
         return
-    bot.send_message(message.chat.id, "Выбери задачу для сдачи", reply_markup=ReplyKeyboardRemove())
-    bot.edit_message_reply_markup(message.chat.id, message.id, reply_markup=participant_keyboard_choose_problem(participant))
+    bot.send_message(message.chat.id, "Выбери задачу для сдачи", reply_markup=participant_keyboard_choose_problem(participant))
+    # reply = bot.send_message(message.chat.id, "Выбери задачу для сдачи", reply_markup=ReplyKeyboardRemove())
+    # bot.edit_message_reply_markup(reply.chat.id, reply.id, reply_markup=participant_keyboard_choose_problem(participant))
 
 
 @bot.callback_query_handler(
