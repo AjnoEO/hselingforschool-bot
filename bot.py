@@ -141,8 +141,12 @@ def send_welcome(message: Message):
         response = ("Ты уже авторизован(-а) как "
                     + ("участник" if isinstance(member, Participant) else "принимающий")
                     + "!\n" + member.display_data())
-        if isinstance(member, Examiner) and not current_olymp.status == OlympStatus.CONTEST:
-            response += "\nЧтобы выбрать задачи для приёма, используй команду /choose\_problems"
+        if isinstance(member, Examiner):
+            if not current_olymp.status == OlympStatus.CONTEST:
+                response += "\nЧтобы выбрать задачи для приёма, используй команду /choose\_problems"
+            elif member.is_busy:
+                response += "\nЧтобы начать принимать задачи, используй команду /free"
+            response += "\nЧтобы просмотреть информацию о себе, используй комануд /my\_info"
         bot.send_message(message.chat.id, response)
         return
     
@@ -152,7 +156,7 @@ def send_welcome(message: Message):
     user_old_handle = User.from_tg_id(tg_id, no_error=True)
     if user_old_handle and new_member:
         if user_old_handle.tg_handle.isnumeric():
-            participant_reply = f"У тебя раньше не было хэндла в Телеграме?"
+            participant_reply = f"Ты участвовал(-а) в прошлой олимпиаде без хэндла?"
         elif new_member.tg_handle.isnumeric():
             participant_reply = f"У тебя раньше в Телеграме был хэндл @{user_old_handle.tg_handle}?"
         else:
@@ -185,33 +189,33 @@ def send_welcome(message: Message):
             )
         return
     
-    bot.send_message(message.chat.id, f"Пользователь не найден. Если ты регистрировался(-лась) на олимпиаду, напишите {OWNER_HANDLE}")
+    bot.send_message(message.chat.id, f"Пользователь не найден. Если ты регистрировался(-лась) на олимпиаду, напиши {OWNER_HANDLE}")
 
 
 @bot.callback_query_handler(lambda callback_query: callback_query.data.startswith('handle_changed_'))
 def handle_change_handler(callback_query: CallbackQuery):
-    handle_changed = (callback_query.data.endswith('_yes'))
+    handle_changed = callback_query.data.endswith('_yes')
     message = callback_query.message
     bot.edit_message_reply_markup(chat_id=message.chat.id, message_id=message.id, reply_markup=None)
     if not handle_changed:
         bot.send_message(message.chat.id, f"Что-то пошло не так. Напиши {OWNER_HANDLE}")
-    else:
-        old_user = User.from_tg_id(callback_query.from_user.id)
-        new_user = User.from_tg_handle(callback_query.from_user.username)
-        old_user.conflate_with(new_user)
-        user_id = old_user.user_id
-        olymp_id = current_olymp.id
-        member: Participant | Examiner | None = \
-            Participant.from_user_id(user_id, olymp_id, no_error=True) or Examiner.from_user_id(user_id, olymp_id, no_error=True)
-        if member:
-            response = ("Ты успешно авторизовался(-лась) как "
-                        + ("участник" if isinstance(member, Participant) else "принимающий")
-                        + "!\n" + member.display_data())
-            if isinstance(member, Examiner) and current_olymp and not current_olymp.status == OlympStatus.CONTEST:
-                response += "\nЧтобы выбрать задачи для приёма, используй команду /choose\_problems"
-            bot.send_message(message.chat.id, response)
-            bot.answer_callback_query(callback_query.id)
-            return
+        return
+    old_user = User.from_tg_id(callback_query.from_user.id)
+    new_user = User.from_tg_handle(callback_query.from_user.username)
+    old_user.conflate_with(new_user)
+    user_id = old_user.user_id
+    olymp_id = current_olymp.id
+    member: Participant | Examiner | None = \
+        Participant.from_user_id(user_id, olymp_id, no_error=True) or Examiner.from_user_id(user_id, olymp_id, no_error=True)
+    if member:
+        response = ("Ты успешно авторизовался(-лась) как "
+                    + ("участник" if isinstance(member, Participant) else "принимающий")
+                    + "!\n" + member.display_data())
+        if isinstance(member, Examiner) and current_olymp and not current_olymp.status == OlympStatus.CONTEST:
+            response += "\nЧтобы выбрать задачи для приёма, используй команду /choose\_problems"
+        bot.send_message(message.chat.id, response)
+        bot.answer_callback_query(callback_query.id)
+        return
 
 
 @bot.message_handler(commands=['help'], roles=['owner', 'examiner', 'participant'])
@@ -224,8 +228,6 @@ def help(message: Message):
         roles.append('examiner')
     if current_olymp and Participant.from_tg_id(message.from_user.id, current_olymp.id, no_error=True):
         roles.append('participant')
-    if len(roles) == 0:
-        raise UserError("Пользователь не найден. Если ты участник или принимающий, пвторизуйся при помощи команды /start")
     role_titles = len(roles) > 1
     for role in roles:
         with open(os.path.join("help", f"{role}.json"), encoding="utf8") as f:
@@ -259,7 +261,7 @@ def participant_stats(message: Message):
         response += f"- *{i+1}: _{escape_markdown(problem.name)}_* — "
         attempts = participant.attempts_left(problem)
         if participant.solved(problem): 
-            response += "решена\n"
+            response += f"решена ({attempts} {decline(attempts, 'балл', ('', 'а', 'ов'))})\n"
             sum += attempts
         else:
             response += (f"не решена, {decline(attempts, 'остал', ('ась', 'ось', 'ось'))} "
@@ -618,6 +620,8 @@ def examiner_busyness_status(message: Message):
         raise UserError("Ты уже свободен(-на). Если хочешь отметить, что ты занят(-а), используй команду /busy")
     if command == 'busy' and examiner.is_busy:
         raise UserError("Ты уже занят(-а). Если хочешь отметить, что ты свободен(-на), используй команду /free")
+    if command == 'free' and examiner.queue_entry:
+        raise UserError("Нельзя отметиться свободным(-ой) во время приёма задачи")
     examiner.is_busy = not examiner.is_busy
     if examiner.is_busy:
         response = "Теперь к тебе не будут приходить на сдачу. Если хочешь отметить, что ты свободен(-на), используй команду /free"
@@ -838,7 +842,8 @@ def queue(message: Message):
         problem_number = int(match.group(1))
         join_queue(participant, problem_number)
         return
-    bot.send_message(message.chat.id, "Выбери задачу для сдачи", reply_markup=participant_keyboard_choose_problem(participant))
+    bot.send_message(message.chat.id, "Выбери задачу для сдачи", reply_markup=ReplyKeyboardRemove())
+    bot.edit_message_reply_markup(message.chat.id, message.id, reply_markup=participant_keyboard_choose_problem(participant))
 
 
 @bot.callback_query_handler(
@@ -848,6 +853,7 @@ def join_queue_handler(callback_query: CallbackQuery):
     message = callback_query.message
     bot.delete_message(message.chat.id, message.id)
     if callback_query.data.endswith('_cancel'):
+        bot.send_message(message.chat.id, "Действие отменено", reply_markup=participant_keyboard)
         return
     participant: Participant = Participant.from_tg_id(callback_query.from_user.id, current_olymp.id)
     queue_entry = participant.queue_entry
@@ -883,7 +889,7 @@ def leave_queue(message: Message):
         error_message = "Ты уже не в очереди"
         if PROMOTE_COMMANDS:
             error_message += ". Чтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`"
-        raise UserError(error_message, reply_markup=participant_keyboard_in_queue)
+        raise UserError(error_message, reply_markup=participant_keyboard)
     if queue_entry.status != QueueStatus.WAITING:
         raise UserError("Нельзя покинуть очередь во время сдачи задач")
     if current_olymp.status == OlympStatus.QUEUE:
@@ -906,21 +912,22 @@ def leave_queue(message: Message):
     olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE]
 )
 def leave_queue_handler(callback_query: CallbackQuery):
-    confirm = callback_query.data.endswith('_confirm')
     message = callback_query.message
     bot.delete_message(message.chat.id, message.id)
-    if confirm:
-        participant: Participant = Participant.from_tg_id(callback_query.from_user.id, current_olymp.id)
-        queue_entry = participant.queue_entry
-        if not queue_entry:
-            error_message = "Ты уже не в очереди"
-            if PROMOTE_COMMANDS:
-                error_message += ". Чтобы записаться в очередь, используй команду `/queue <номер задачи>`"
-            raise UserError(error_message, reply_markup=participant_keyboard)
-        if queue_entry.status != QueueStatus.WAITING:
-            raise UserError("Нельзя покинуть очередь во время сдачи задач")
-        queue_entry.status = QueueStatus.CANCELED
-        announce_queue_entry(queue_entry)
+    if callback_query.data.endswith('_cancel'):
+        bot.send_message(message.chat.id, "Действие отменено", reply_markup=participant_keyboard_in_queue)
+        return
+    participant: Participant = Participant.from_tg_id(callback_query.from_user.id, current_olymp.id)
+    queue_entry = participant.queue_entry
+    if not queue_entry:
+        error_message = "Ты уже не в очереди"
+        if PROMOTE_COMMANDS:
+            error_message += ". Чтобы записаться в очередь, используй команду `/queue <номер задачи>`"
+        raise UserError(error_message, reply_markup=participant_keyboard)
+    if queue_entry.status != QueueStatus.WAITING:
+        raise UserError("Нельзя покинуть очередь во время сдачи задач")
+    queue_entry.status = QueueStatus.CANCELED
+    announce_queue_entry(queue_entry)
 
 
 @bot.message_handler(commands=['give_out_second_block', 'give_out_third_block'], roles=['owner'], olymp_statuses=[OlympStatus.CONTEST])
