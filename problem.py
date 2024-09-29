@@ -66,7 +66,7 @@ class Problem:
         for f in fetch:
             pr_id = f[0]
             if f[1] == name:
-                raise UserError(f"Название <em>{escape_html(name)}</em> уже занято задачей {pr_id}")
+                raise UserError(f"Название <em>{escape_html(name)}</em> уже занято задачей <code>{pr_id}</code>")
         values = (olymp_id, name)
         cursor.execute("INSERT INTO problems(olymp_id, name) VALUES (?, ?)", values)
         cursor.connection.commit()
@@ -95,8 +95,9 @@ class Problem:
     def name(self): return self.__name
     @name.setter
     def name(self, value: str):
-        if Problem.from_name(value, self.olymp_id, no_error=True):
-            raise UserError(f"Задача с названием <em>{escape_html(value)}</em> уже есть в этой олимпиаде")
+        problem = Problem.from_name(value, self.olymp_id, no_error=True)
+        if problem:
+            raise UserError(f"Название <em>{escape_html(problem.name)}</em> уже занято задачей <code>{problem.id}</code>")
         self.__set("name", value)
         self.__name = value
 
