@@ -6,7 +6,7 @@ from db import create_update_db
 from data import TOKEN, OWNER_ID, OWNER_HANDLE
 import telebot
 from telebot.types import Message, CallbackQuery, InputFile, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
-from telebot.formatting import escape_markdown
+from telebot.formatting import escape_html
 from telebot.custom_filters import SimpleCustomFilter, AdvancedCustomFilter
 from telebot.util import quick_markup, extract_command
 from olymp import Olymp, OlympStatus
@@ -16,7 +16,6 @@ from queue_entry import QueueEntry, QueueStatus
 from utils import UserError, decline, get_arg, get_n_args, get_file
 import pandas as pd
 from io import BytesIO
-from prettytable import from_json
 
 
 PROMOTE_COMMANDS = False # Подсказывать ли команды участникам
@@ -50,14 +49,14 @@ class MyExceptionHandler(telebot.ExceptionHandler):
             filename = os.path.split(traceback.tb_frame.f_code.co_filename)[1]
             line_number = traceback.tb_lineno
             error_message = (f"⚠️ Во время выполнения операции произошла ошибка:\n"
-                             f"`{exc.__class__.__name__} "
-                             f"({filename}, строка {line_number}): {exc}`")
+                             f"<code>{exc.__class__.__name__} "
+                             f"({filename}, строка {line_number}): {exc}</code>")
         error_message += f"\nЕсли тебе кажется, что это баг, сообщи {OWNER_HANDLE}"
         bot.send_message(message.chat.id, error_message, reply_markup=reply_markup)
         return handled
 
 
-bot = telebot.TeleBot(TOKEN, parse_mode="markdown", disable_web_page_preview=True, exception_handler=MyExceptionHandler())
+bot = telebot.TeleBot(TOKEN, parse_mode="HTML", disable_web_page_preview=True, exception_handler=MyExceptionHandler())
 
 class RolesFilter(AdvancedCustomFilter): # owner, examiner, participant
     key = 'roles'
@@ -143,10 +142,10 @@ def send_welcome(message: Message):
                     + "!\n" + member.display_data())
         if isinstance(member, Examiner):
             if not current_olymp.status == OlympStatus.CONTEST:
-                response += "\nЧтобы выбрать задачи для приёма, используй команду /choose\_problems"
+                response += "\nЧтобы выбрать задачи для приёма, используй команду /choose_problems"
             elif member.is_busy:
                 response += "\nЧтобы начать принимать задачи, используй команду /free"
-            response += "\nЧтобы просмотреть информацию о себе, используй комануд /my\_info"
+            response += "\nЧтобы просмотреть информацию о себе, используй комануд /my_info"
         bot.send_message(message.chat.id, response)
         return
     
@@ -177,7 +176,7 @@ def send_welcome(message: Message):
                     + ("участник" if isinstance(new_member, Participant) else "принимающий")
                     + "!\n" + new_member.display_data())
         if isinstance(member, Examiner) and not current_olymp.status == OlympStatus.CONTEST:
-            response += "\nЧтобы выбрать задачи для приёма, используй команду /choose\_problems"
+            response += "\nЧтобы выбрать задачи для приёма, используй команду /choose_problems"
         bot.send_message(message.chat.id, response)
         if current_olymp.status != OlympStatus.CONTEST or isinstance(new_member, Examiner):
             return
@@ -212,7 +211,7 @@ def handle_change_handler(callback_query: CallbackQuery):
                     + ("участник" if isinstance(member, Participant) else "принимающий")
                     + "!\n" + member.display_data())
         if isinstance(member, Examiner) and current_olymp and not current_olymp.status == OlympStatus.CONTEST:
-            response += "\nЧтобы выбрать задачи для приёма, используй команду /choose\_problems"
+            response += "\nЧтобы выбрать задачи для приёма, используй команду /choose_problems"
         bot.send_message(message.chat.id, response)
         bot.answer_callback_query(callback_query.id)
         return
@@ -238,11 +237,11 @@ def help(message: Message):
     response = ""
     for block in commands:
         if isinstance(block, str):
-            response += f"*{block}*\n\n"
+            response += f"<strong>{block}</strong>\n\n"
             continue
         for command_description in block:
             command, description = tuple(command_description)
-            command = escape_markdown("/" + command) if (" " not in command) else f"`/{command}`"
+            command = ("/" + command) if (" " not in command) else f"<code>/{escape_html(command)}</code>"
             response += command + " — " + description + "\n"
         response += "\n"
     bot.send_message(message.chat.id, response)
@@ -258,7 +257,7 @@ def participant_stats(message: Message):
     response = f"Информация о сдачах задач:\n"
     sum = 0
     for i, problem in enumerate(participant.problems()):
-        response += f"- *{i+1}: _{escape_markdown(problem.name)}_* — "
+        response += f"- <strong>{i+1}: <em>{escape_html(problem.name)}</em></strong> — "
         attempts = participant.attempts_left(problem)
         if participant.solved(problem): 
             response += f"решена ({attempts} {decline(attempts, 'балл', ('', 'а', 'ов'))})\n"
@@ -266,7 +265,7 @@ def participant_stats(message: Message):
         else:
             response += (f"не решена, {decline(attempts, 'остал', ('ась', 'ось', 'ось'))} "
                          f"{attempts} {decline(attempts, 'попыт', ('ка', 'ки', 'ок'))} из 3\n")
-    response += f"Набрано баллов: *{sum}*"
+    response += f"Набрано баллов: <strong>{sum}</strong>"
     bot.send_message(message.chat.id, response)
 
 
@@ -283,14 +282,14 @@ def examiner_stats(message: Message):
     if len(problems) == 0:
         response += f"Задач нет\n"
     else:
-        response += f"*Задачи:*\n"
+        response += f"<strong>Задачи:</strong>\n"
         for problem_id in examiner.problems:
             problem = Problem.from_id(problem_id)
-            response += f"- _{escape_markdown(problem.name)}_\n"
+            response += f"- <em>{escape_html(problem.name)}</em>\n"
     if current_olymp.status != OlympStatus.REGISTRATION:
         response += (
-            f"*Статус:* {'занят(-а)' if examiner.is_busy else 'свободен(-на)'}\n"
-            f"*Обсуждений с участниками:* {examiner.busyness_level}"
+            f"<strong>Статус:</strong> {'занят(-а)' if examiner.is_busy else 'свободен(-на)'}\n"
+            f"<strong>Обсуждений с участниками:</strong> {examiner.busyness_level}"
         )
     bot.send_message(message.chat.id, response)
 
@@ -307,7 +306,7 @@ def olymp_reg_start(message: Message):
     participants = current_olymp.get_participants()
     examiners = current_olymp.get_examiners()
     # TODO: Рассылка уже зарегистрированным участникам и принимающим
-    bot.send_message(message.chat.id, f"Регистрация на олимпиаду _{current_olymp.name}_ запущена")
+    bot.send_message(message.chat.id, f"Регистрация на олимпиаду <em>{current_olymp.name}</em> запущена")
 
 
 @bot.message_handler(commands=['olymp_start'], roles=['owner'])
@@ -333,7 +332,7 @@ def olymp_start(message: Message):
     for e in examiners:
         if e.tg_id:
             bot.send_message(e.tg_id, "Олимпиада началась! Напиши /free и ожидай участников")
-    bot.send_message(message.chat.id, f"Олимпиада _{current_olymp.name}_ начата")
+    bot.send_message(message.chat.id, f"Олимпиада <em>{current_olymp.name}</em> начата")
 
 
 def finish_olymp():
@@ -389,12 +388,12 @@ def olymp_create(message: Message):
     if current_olymp and current_olymp.status != OlympStatus.RESULTS:
         bot.send_message(
             message.chat.id,
-            f"Уже имеется незавершённая олимпиада _{current_olymp.name}_. Заверши её, чтобы создать новую"
+            f"Уже имеется незавершённая олимпиада <em>{current_olymp.name}</em>. Заверши её, чтобы создать новую"
         )
         return
     name = get_arg(message, "Для олимпиады необходимо название")
     current_olymp = Olymp.create(name)
-    bot.send_message(message.chat.id, f"Олимпиада _{current_olymp.name}_ успешно создана")
+    bot.send_message(message.chat.id, f"Олимпиада <em>{current_olymp.name}</em> успешно создана")
 
 
 def upload_members(message: Message, required_columns: list[str], member_class: type[OlympMember],
@@ -412,7 +411,7 @@ def upload_members(message: Message, required_columns: list[str], member_class: 
         member_class.create_as_new_user(**m, olymp_id=current_olymp.id, ok_if_user_exists=True)
     amount = member_table.shape[0]
     response = (f"{amount} {decline(amount, term_stem, term_endings)} успешно "
-                f"{decline(amount, 'добавлен', ('', 'ы', 'ы'))} в олимпиаду _{current_olymp.name}_")
+                f"{decline(amount, 'добавлен', ('', 'ы', 'ы'))} в олимпиаду <em>{current_olymp.name}</em>")
     bot.send_message(message.chat.id, response)
 
 
@@ -467,7 +466,7 @@ def set_examiner_problems(message: Message):
     examiner.set_problems(problems)
     examiner_response = "Твой список задач обновлён:\n"
     for problem_id in problems:
-        examiner_response += f"- _{escape_markdown(Problem.from_id(problem_id).name)}_\n"
+        examiner_response += f"- <em>{escape_html(Problem.from_id(problem_id).name)}</em>\n"
     bot.send_message(examiner.tg_id, examiner_response)
     bot.send_message(message.chat.id, f"Список задач принимающего {examiner.name} {examiner.surname} обновлён")
 
@@ -479,10 +478,10 @@ def olymp_info(message: Message):
     else:
         p_amount = current_olymp.participants_amount()
         e_amount = current_olymp.examiners_amount()
-        pr_amount = current_olymp.participants_amount()
-        response = (f"Олимпиада _{current_olymp.name}_:\n"
-                    f"ID: `{current_olymp.id}`\n"
-                    f"Состояние: `{current_olymp.status.name}`\n"
+        pr_amount = current_olymp.participants_amount() # Почему-то говорит неправду
+        response = (f"Олимпиада <em>{current_olymp.name}</em>:\n"
+                    f"<strong>ID:</strong> <code>{current_olymp.id}</code>\n"
+                    f"<strong>Статус:</strong> <code>{current_olymp.status.name}</code>\n"
                     f"{p_amount} {decline(p_amount, 'участник', ('', 'а', 'ов'))}\n"
                     f"{e_amount} {decline(e_amount, 'принимающ', ('ий', 'их', 'их'))}\n"
                     f"{pr_amount} {decline(pr_amount, 'задач', ('а', 'и', ''))}")
@@ -495,8 +494,9 @@ def olymp_info(message: Message):
     olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE, OlympStatus.RESULTS]
 )
 def last_queue_entries(message: Message):
-    syntax_hint = ("Синтаксис команды: `/last_queue_entries [participant=<tg-хэндл>] "
-                   "[examiner=<tg-хэндл>] [problem=<ID>] [limit=<ограничение>]`")
+    syntax_hint = ("Синтаксис команды: <code>"
+                   + escape_html("/last_queue_entries [participant=<tg-хэндл>] [examiner=<tg-хэндл>] [problem=<ID>] [limit=<ограничение>]")
+                   + "</code>")
     args = get_n_args(message, 0, 4, syntax_hint)
     settings = {}
     for arg in args:
@@ -527,13 +527,13 @@ def last_queue_entries(message: Message):
         participant: Participant = chosen_participant or Participant.from_id(queue_entry.participant_id)
         examiner: Examiner | None = chosen_examiner or (Examiner.from_id(queue_entry.examiner_id) if queue_entry.examiner_id else None)
         problem: Problem = chosen_problem or Problem.from_id(queue_entry.problem_id)
-        response += (f"ЗАПИСЬ `{queue_entry.id}`\n"
-                     f"- *Участник:* {participant.name} {participant.surname} ({participant.grade} класс)\n")
+        response += (f"ЗАПИСЬ <code>{queue_entry.id}</code>\n"
+                     f"- <strong>Участник:</strong> {participant.name} {participant.surname} ({participant.grade} класс)\n")
         if examiner: 
-            response += f"- *Принимающий:* {examiner.name} {examiner.surname}\n"
-        else: response += "- Принимающий не назначен\n"
-        response += (f"- *Задача:* `{problem.id}` _{escape_markdown(problem.name)}_\n"
-                     f"- *Статус:* {queue_entry.status}\n")
+            response += f"- <strong>Принимающий:</strong> {examiner.name} {examiner.surname}\n"
+        else: response += "- <strong>Принимающий</strong> не назначен\n"
+        response += (f"- <strong>Задача:</strong> <code>{problem.id}</code> <em>{escape_html(problem.name)}</em>\n"
+                     f"- <strong>Статус:</strong> {queue_entry.status}\n")
     bot.send_message(message.chat.id, response)
     
         
@@ -571,7 +571,7 @@ def problem_create(message: Message):
         raise UserError("Нет текущей олимпиады")
     name = get_arg(message, "Для задачи необходимо название")
     problem = Problem.create(current_olymp.id, name)
-    bot.send_message(message.chat.id, f"Задача _{problem.name}_ добавлена! ID: `{problem.id}`")
+    bot.send_message(message.chat.id, f"Задача <em>{escape_html(problem.name)}</em> добавлена! ID: <code>{problem.id}</code>")
 
 
 @bot.message_handler(commands=['problem_rename'], roles=['owner'])
@@ -583,7 +583,7 @@ def problem_rename(message: Message):
     if problem.olymp_id != current_olymp.id:
         raise UserError("Задача не относится к текущей олимпиаде")
     problem.name = name
-    bot.send_message(message.chat.id, f"Задача `{problem.id}` переименована: _{problem.name}_")
+    bot.send_message(message.chat.id, f"Задача <code>{problem.id}</code> переименована: <em>{escape_html(problem.name)}</em>")
 
 
 @bot.message_handler(commands=['problem_list'], roles=['owner', 'examiner'])
@@ -592,11 +592,11 @@ def problem_list(message: Message):
         raise UserError("Нет текущей олимпиады")
     problems = current_olymp.get_problems()
     if len(problems) == 0:
-        bot.send_message(message.chat.id, f"В олимпиаде _{current_olymp.name}_ ещё нет задач")
+        bot.send_message(message.chat.id, f"В олимпиаде <em>{current_olymp.name}</em> ещё нет задач")
         return
-    response = f"Задачи олимпиады _{current_olymp.name}_:\n"
+    response = f"Задачи олимпиады <em>{current_olymp.name}</em>:\n"
     for p in problems:
-        response += f"- `{p.id}` _{p.name}_\n"
+        response += f"- <code>{p.id}</code> <em>{escape_html(p.name)}</em>\n"
     bot.send_message(message.chat.id, response)
 
 
@@ -610,8 +610,8 @@ def problem_info(message: Message):
         if message.from_user.id != OWNER_ID:
             raise UserError("Задача не найдена")
         response += "⚠️ Задача не относится к текущей олимпиаде\n"
-    response += (f"Информация о задаче _{problem.name}_:\n"
-                f"ID: `{problem.id}`\n")
+    response += (f"Информация о задаче <em>{escape_html(problem.name)}</em>:\n"
+                f"ID: <code>{problem.id}</code>\n")
     blocks = problem.get_blocks()
     if len(blocks) == 0:
         response += "Задача не входит ни в какие блоки"
@@ -619,9 +619,9 @@ def problem_info(message: Message):
         response += "Блоки задач:\n"
         for block in blocks:
             if block.block_type:
-                response += f"- {block.block_type.description()}\n"
+                response += f"- {block.block_type}\n"
             else:
-                response += f"- Блок `{block.id}`\n"
+                response += f"- Блок <code>{block.id}</code>\n"
     bot.send_message(message.chat.id, response)
 
 
@@ -635,7 +635,7 @@ def problem_block_create(message: Message):
     block_type = None
     if len(args) > 3:
         if not re.match(r"^(JUNIOR|SENIOR)_[123]$", args[3]):
-            raise UserError("Тип блока должен быть указан в форме `(JUNIOR|SENIOR)_(1|2|3)`")
+            raise UserError("Тип блока должен быть указан в форме <code>(JUNIOR|SENIOR)_(1|2|3)</code>")
         block_type = BlockType[args[3]]
     filename = telebot.util.generate_random_token()
     dir = "downloaded_files"
@@ -644,11 +644,11 @@ def problem_block_create(message: Message):
     with open(path, "wb") as f:
         f.write(file)
     problem_block = ProblemBlock.create(current_olymp.id, problems, block_type=block_type, path=path)
-    response = (f"Блок `{problem_block.id}` "
-                + (f"({problem_block.block_type.description()}) " if problem_block.block_type else "")
+    response = (f"Блок <code>{problem_block.id}</code> "
+                + (f"({problem_block.block_type}) " if problem_block.block_type else "")
                 + f"создан!\nЗадачи:\n")
     for problem in problem_block.problems:
-        response += f"- `{problem.id}` _{problem.name}_\n"
+        response += f"- <code>{problem.id}</code> <em>{escape_html(problem.name)}</em>\n"
     bot.send_message(message.chat.id, response)
 
 
@@ -679,10 +679,10 @@ def examiner_chooses_problem(message: Message):
     examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
     if problem.id in examiner.problems:
         examiner.remove_problem(problem)
-        response = f"Задача _{escape_markdown(problem.name)}_ удалена из твоего списка задач"
+        response = f"Задача <em>{escape_html(problem.name)}</em> удалена из твоего списка задач"
     else:
         examiner.add_problem(problem)
-        response = f"Задача _{escape_markdown(problem.name)}_ добавлена в твой список задач"
+        response = f"Задача <em>{escape_html(problem.name)}</em> добавлена в твой список задач"
     response += "\n" + examiner.display_problem_data()
     bot.send_message(message.chat.id, response)
     bot.register_next_step_handler_by_chat_id(message.chat.id, examiner_chooses_problem)
@@ -721,17 +721,19 @@ def announce_queue_entry(queue_entry: QueueEntry):
     
     if not queue_entry.examiner_id:
         if queue_entry.status == QueueStatus.WAITING:
-            response = (f"Ты теперь в очереди на задачу {problem_number}: _{escape_markdown(problem.name)}_. "
+            response = (f"Ты теперь в очереди на задачу {problem_number}: <em>{escape_html(problem.name)}</em>. "
                         f"Свободных принимающих пока нет, но бот напишет тебе, когда подходящий принимающий освободится")
             if PROMOTE_COMMANDS:
-                response += f"\nЧтобы покинуть очередь, используй команду /leave\_queue"
+                response += f"\nЧтобы покинуть очередь, используй команду /leave_queue"
             bot.send_message(participant.tg_id, response, reply_markup=participant_keyboard_in_queue)
             return
         elif queue_entry.status == QueueStatus.CANCELED:
             if current_olymp.status == OlympStatus.CONTEST:
                 response = "Ты больше не в очереди"
                 if PROMOTE_COMMANDS:
-                    response += ". Чтобы записаться на сдачу задачи снова, используй команду `/queue <номер задачи>`"
+                    response += (". Чтобы записаться на сдачу задачи снова, используй команду <code>"
+                                 + escape_html("/queue <номер задачи>")
+                                 + "</code>")
                 keyboard = participant_keyboard
             else:
                 response = "Ты больше не в очереди. Олимпиада завершена, можешь отправляться на заслуженный отдых"
@@ -746,31 +748,34 @@ def announce_queue_entry(queue_entry: QueueEntry):
     if queue_entry.status not in QueueStatus.active():
         new_problem_block = None
         if queue_entry.status == QueueStatus.FAIL:
-            participant_response = f"Задача {problem_number}: _{escape_markdown(problem.name)}_ не принята"
+            participant_response = f"Задача {problem_number}: <em>{escape_html(problem.name)}</em> не принята"
             if current_olymp.status == OlympStatus.CONTEST:
                 attempts = participant.attempts_left(problem)
                 participant_response += (f". У тебя {decline(attempts, 'остал', ('ась', 'ось', 'ось'))} "
                                         f"{attempts} {decline(attempts, 'попыт', ('ка', 'ки', 'ок'))}, "
                                         f"чтобы её сдать")
-            examiner_response = (f"Задача _{escape_markdown(problem.name)}_ отмечена "
+            examiner_response = (f"Задача <em>{escape_html(problem.name)}</em> отмечена "
                                  f"как несданная участником {participant.name} {participant.surname}")
         elif queue_entry.status == QueueStatus.CANCELED:
-            participant_response = f"Сдача задачи {problem_number}: _{escape_markdown(problem.name)}_ отменена. Ты больше не в очереди"
+            participant_response = (f"Сдача задачи {problem_number}: <em>{escape_html(problem.name)}</em> отменена. "
+                                    f"Ты больше не в очереди")
             if current_olymp.status == OlympStatus.CONTEST:
                 participant_response += ". Попытка не потрачена"
-            examiner_response = (f"Сдача задачи _{escape_markdown(problem.name)}_ "
+            examiner_response = (f"Сдача задачи <em>{escape_html(problem.name)}</em> "
                                  f"участником {participant.name} {participant.surname} отменена")
         elif queue_entry.status == QueueStatus.SUCCESS:
-            participant_response = f"Задача {problem_number}: _{escape_markdown(problem.name)}_ принята! Поздравляем"
+            participant_response = f"Задача {problem_number}: <em>{escape_html(problem.name)}</em> принята! Поздравляем"
             if current_olymp.status == OlympStatus.CONTEST and participant.should_get_new_problem(problem):
                 new_problem_block = participant.give_next_problem_block()
                 participant_response += (f"\nЗа решение этой задачи тебе полагается {participant.last_block_number} блок задач. "
                                          f"Теперь можешь сдавать и их!")
-            examiner_response = (f"Задача _{escape_markdown(problem.name)}_ отмечена "
+            examiner_response = (f"Задача <em>{escape_html(problem.name)}</em> отмечена "
                                  f"как успешно сданная участником {participant.name} {participant.surname}")
         if current_olymp.status == OlympStatus.CONTEST:
             if PROMOTE_COMMANDS:
-                participant_response += "\nЧтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`"
+                participant_response += ("\nЧтобы записаться на сдачу задачи, используй команду <code>"
+                                         + escape_html("/queue <номер задачи>")
+                                         + "</code>")
             keyboard = participant_keyboard
         else:
             participant_response += "\nОлимпиада завершена, можешь отправляться на заслуженный отдых"
@@ -792,7 +797,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
             finish_olymp()
         return
     
-    participant_response = (f"Задачу {problem_number}: _{escape_markdown(problem.name)}_ "
+    participant_response = (f"Задачу {problem_number}: <em>{escape_html(problem.name)}</em> "
                             f"у тебя примет {examiner.name} {examiner.surname}.\n"
                             f"Ссылка: {examiner.conference_link}")
     bot.send_message(
@@ -800,7 +805,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
         participant_response, 
         reply_markup=quick_markup({'Принимающий не пришёл': {'callback_data': 'examiner_didnt_come'}} if NO_EXAMINER_COMPLAINTS else None)
     )
-    examiner_response = (f"К тебе идёт сдавать задачу _{escape_markdown(problem.name)}_ "
+    examiner_response = (f"К тебе идёт сдавать задачу <em>{escape_html(problem.name)}</em> "
                          f"участник {participant.name} {participant.surname} ({participant.grade} класс). "
                          f"Ты можешь принять или отклонить решение, а также отменить сдачу (например, если участник "
                          f"не пришёл или если ты не хочешь учитывать эту сдачу как потраченную попытку)")
@@ -828,10 +833,10 @@ def withdraw_examiner(message: Message):
     else:
         problem = Problem.from_id(queue_entry.problem_id)
         problem_number = participant.get_problem_number(problem)
-        participant_response = (f"Вернули тебя в начало очереди на задачу {problem_number}: _{escape_markdown(problem.name)}_. "
+        participant_response = (f"Вернули тебя в начало очереди на задачу {problem_number}: <em>{escape_html(problem.name)}</em>. "
                                 f"Свободных принимающих пока нет, но бот напишет тебе, когда подходящий принимающий освободится")
         if PROMOTE_COMMANDS:
-            participant_response += f"Чтобы покинуть очередь, используй команду /leave\_queue"
+            participant_response += f"Чтобы покинуть очередь, используй команду /leave_queue"
         bot.send_message(participant.tg_id, participant_response, reply_markup=participant_keyboard_in_queue)
 
 
@@ -880,12 +885,13 @@ def examiner_didnt_come_handler(callback_query: CallbackQuery):
     examiner.withdraw_from_queue_entry()
     examiner_response = (f"{participant.name} {participant.surname} отметил(-а), что тебя не было на приёме задачи. "
                          f"Пожалуйста, используй команду /busy, если тебе надо отойти!\n"
-                         f"Бот установил тебе статус \"занят(-а)\". Когда вернёшься, используй команду /free, чтобы продолжить принимать задачи")
+                         f"Бот установил тебе статус \"занят(-а)\". "
+                         f"Когда вернёшься, используй команду /free, чтобы продолжить принимать задачи")
     bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
     queue_entry = participant.queue_entry
     owner_message = (f"{participant.name} {participant.surname} ({participant.grade} класс) пожаловался(-лась), "
                      f"что принимающего {examiner.name} {examiner.surname} не было на приёме задачи "
-                     f"(запись в очереди: `{queue_entry.id}`)")
+                     f"(запись в очереди: <code>{queue_entry.id}</code>)")
     bot.send_message(OWNER_ID, owner_message)
     bot.answer_callback_query(callback_query.id, "Мы сообщили организаторам о проблеме")
     new_examiner_id = queue_entry.look_for_examiner()
@@ -896,10 +902,10 @@ def examiner_didnt_come_handler(callback_query: CallbackQuery):
     else:
         problem = Problem.from_id(queue_entry.problem_id)
         problem_number = participant.get_problem_number(problem)
-        participant_response = (f"Вернули тебя в начало очереди на задачу {problem_number}: _{escape_markdown(problem.name)}_. "
+        participant_response = (f"Вернули тебя в начало очереди на задачу {problem_number}: <em>{escape_html(problem.name)}</em>. "
                                 f"Свободных принимающих пока нет, но бот напишет тебе, когда подходящий принимающий освободится")
         if PROMOTE_COMMANDS:
-            participant_response += f"Чтобы покинуть очередь, используй команду /leave\_queue"
+            participant_response += f"Чтобы покинуть очередь, используй команду /leave_queue"
         bot.send_message(participant.tg_id, participant_response, reply_markup=participant_keyboard_in_queue)
 
 
@@ -909,9 +915,9 @@ def queue(message: Message):
     if participant.queue_entry:
         problem = Problem.from_id(participant.queue_entry.problem_id)
         problem_number = participant.get_problem_number(problem)
-        error_message = f"Ты уже в очереди на задачу {problem_number}: _{problem.name}_"
+        error_message = f"Ты уже в очереди на задачу {problem_number}: <em>{escape_html(problem.name)}</em>"
         if PROMOTE_COMMANDS:
-            error_message += ". Чтобы покинуть очередь, используй команду /leave\_queue"
+            error_message += ". Чтобы покинуть очередь, используй команду /leave_queue"
         raise UserError(error_message, reply_markup=participant_keyboard_in_queue)
     if match := re.match(r"/queue (\d+)", message.text):
         match: re.Match
@@ -937,9 +943,9 @@ def join_queue_handler(callback_query: CallbackQuery):
     if queue_entry:
         problem = Problem.from_id(queue_entry.problem_id)
         problem_number = participant.get_problem_number(problem)
-        error_message = f"Ты уже в очереди на задачу {problem_number}: _{problem.name}_"
+        error_message = f"Ты уже в очереди на задачу {problem_number}: <em>{escape_html(problem.name)}</em>"
         if PROMOTE_COMMANDS:
-            error_message += ". Чтобы покинуть очередь, используй команду /leave\_queue"
+            error_message += ". Чтобы покинуть очередь, используй команду /leave_queue"
         raise UserError(error_message, reply_markup=participant_keyboard_in_queue)
     problem_number = int(callback_query.data[len('join_queue_'):])
     join_queue(participant, problem_number)
@@ -948,11 +954,11 @@ def join_queue_handler(callback_query: CallbackQuery):
 def join_queue(participant: Participant, problem_number: int):
     problem = participant.problem_from_number(problem_number)
     if participant.attempts_left(problem) <= 0:
-        raise UserError(f"У тебя не осталось попыток, чтобы сдать задачу {problem_number}: _{escape_markdown(problem.name)}_… "
+        raise UserError(f"У тебя не осталось попыток, чтобы сдать задачу {problem_number}: <em>{escape_html(problem.name)}</em>… "
                         f"Стоит заняться другими задачами",
                         reply_markup=participant_keyboard)
     if participant.solved(problem):
-        raise UserError(f"Задача {problem_number}: _{escape_markdown(problem.name)}_ уже сдана! Займись другими задачами",
+        raise UserError(f"Задача {problem_number}: <em>{escape_html(problem.name)}</em> уже сдана! Займись другими задачами",
                         reply_markup=participant_keyboard)
     queue_entry = participant.join_queue(problem)
     announce_queue_entry(queue_entry)
@@ -965,7 +971,9 @@ def leave_queue(message: Message):
     if not queue_entry:
         error_message = "Ты уже не в очереди"
         if PROMOTE_COMMANDS:
-            error_message += ". Чтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`"
+            error_message += (". Чтобы записаться на сдачу задачи, используй команду <code>"
+                              + escape_html("/queue <номер задачи>")
+                              + "</code>")
         raise UserError(error_message, reply_markup=participant_keyboard)
     if queue_entry.status != QueueStatus.WAITING:
         raise UserError("Нельзя покинуть очередь во время сдачи задач")
@@ -999,7 +1007,9 @@ def leave_queue_handler(callback_query: CallbackQuery):
     if not queue_entry:
         error_message = "Ты уже не в очереди"
         if PROMOTE_COMMANDS:
-            error_message += ". Чтобы записаться в очередь, используй команду `/queue <номер задачи>`"
+            error_message += (". Чтобы записаться в очередь, используй команду <code>"
+                              + escape_html("/queue <номер задачи>")
+                              + "</code>")
         raise UserError(error_message, reply_markup=participant_keyboard)
     if queue_entry.status != QueueStatus.WAITING:
         raise UserError("Нельзя покинуть очередь во время сдачи задач")
@@ -1025,7 +1035,9 @@ def give_out_problem_block(message: Message):
                 participant_reply = (f"Тебе выдан {'второй' if last_block_number + 1 == 2 else 'третий'} блок задач. "
                                      f"Теперь можешь сдавать и их!")
                 if PROMOTE_COMMANDS:
-                    participant_reply += f"\nЧтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`"
+                    participant_reply += (f"\nЧтобы записаться на сдачу задачи, используй команду <code>"
+                                          + escape_html("/queue <номер задачи>")
+                                          + "</code>")
                 bot.send_document(
                     p.tg_id,
                     InputFile(new_problem_block.path, f"Блок_{last_block_number + 1}.pdf"),
@@ -1050,7 +1062,9 @@ def give_problem_block(message: Message):
     participant_reply = (f"Тебе выдан {'второй' if participant.last_block_number == 2 else 'третий'} блок задач. "
                          f"Теперь можешь сдавать и их!")
     if PROMOTE_COMMANDS:
-        participant_reply += f"\nЧтобы записаться на сдачу задачи, используй команду `/queue <номер задачи>`"
+        participant_reply += ("\nЧтобы записаться на сдачу задачи, используй команду <code>"
+                              + escape_html("/queue <номер задачи>")
+                              + "</code>")
     bot.send_document(
         participant.tg_id,
         InputFile(problem_block.path, f"Блок_{participant.last_block_number}.pdf"),

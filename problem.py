@@ -1,7 +1,8 @@
 from enums import BlockType
 import sqlite3
 from db import DATABASE
-from utils import UserError, update_in_table, provide_cursor, value_exists
+from utils import UserError, update_in_table, provide_cursor
+from telebot.formatting import escape_html
 
 class Problem:
     def __init__(
@@ -65,7 +66,7 @@ class Problem:
         for f in fetch:
             pr_id = f[0]
             if f[1] == name:
-                raise UserError(f"Название {name} уже занято задачей {pr_id}")
+                raise UserError(f"Название <em>{escape_html(name)}</em> уже занято задачей {pr_id}")
         values = (olymp_id, name)
         cursor.execute("INSERT INTO problems(olymp_id, name) VALUES (?, ?)", values)
         cursor.connection.commit()
@@ -95,7 +96,7 @@ class Problem:
     @name.setter
     def name(self, value: str):
         if Problem.from_name(value, self.olymp_id, no_error=True):
-            raise UserError(f"Задача с названием {value} уже есть в этой олимпиаде")
+            raise UserError(f"Задача с названием <em>{escape_html(value)}</em> уже есть в этой олимпиаде")
         self.__set("name", value)
         self.__name = value
 
@@ -174,7 +175,7 @@ class ProblemBlock:
             fetch = cursor.fetchone()
             if fetch is not None:
                 block_id = fetch[0]
-                raise UserError(f"Блок типа `{block_type}` уже есть: `{block_id}`")
+                raise UserError(f"{block_type} уже есть: <code>{block_id}</code>")
         if not isinstance(problems[0], int):
             problems = [pr.id for pr in problems]
         values = [olymp_id, block_type, path] + problems

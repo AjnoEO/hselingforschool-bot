@@ -26,7 +26,7 @@ class Olymp:
             cur.execute("SELECT * FROM olymps WHERE name = ?", (name,))
             fetch = cur.fetchone()
         if not fetch:
-            raise UserError(f"Олимпиады {name} не найдено")
+            raise UserError(f"Олимпиады <em>{name}</em> не найдено")
         return cls(*fetch)
     
     
@@ -44,7 +44,7 @@ class Olymp:
         """
         exists = value_exists("olymps", {"name": name})
         if exists:
-            raise UserError(f"Олимпиада {name} уже есть в базе")
+            raise UserError(f"Олимпиада <em>{name}</em> уже есть в базе")
         values = (name, status)
         cursor.execute("INSERT INTO olymps(name, status) VALUES (?, ?)", values)
         cursor.connection.commit()

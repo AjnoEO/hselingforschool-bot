@@ -63,5 +63,5 @@ class BlockType(SqliteCompatibleEnum):
     def number(self) -> int:
         return self.value % 3 + 1
     
-    def description(self) -> str:
+    def __str__(self) -> str:
         return f"{self.number()} блок для {'младших' if self.is_junior() else 'старших'}"
