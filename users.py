@@ -748,6 +748,28 @@ class Examiner(OlympMember):
             cur.execute("DELETE FROM examiner_problems WHERE examiner_id = ? AND problem_id = ?", (self.id, problem))
             conn.commit()
         self.__problems.remove(problem)
+
+    def set_problems(self, problems: list[Problem] | list[int] | None):
+        if problems is None:
+            problems = []
+        elif isinstance(problems[0], Problem):
+            problems = [problem.id for problem in problems]
+        remove = []
+        add = []
+        for problem in self.problems:
+            if problem not in problems:
+                remove.append(problem)
+        for problem in problems:
+            if problem not in self.problems:
+                add.append(problem)
+        with sqlite3.connect(DATABASE) as conn:
+            cur = conn.cursor()
+            for problem in remove:
+                cur.execute("DELETE FROM examiner_problems WHERE examiner_id = ? AND problem_id = ?", (self.id, problem))
+            for problem in add:
+                cur.execute("INSERT INTO examiner_problems(examiner_id, problem_id) VALUES (?, ?)", (self.id, problem))
+            conn.commit()
+        self.__problems = problems
     
 
     @property

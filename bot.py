@@ -277,7 +277,7 @@ def examiner_stats(message: Message):
     examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
     response = (f"Информация о тебе:\n"
                 f"{examiner.display_data(contact_note=False)}\n")
-    problems = [Problem.from_id(problem_id) for problem_id in examiner.problmes]
+    problems = [Problem.from_id(problem_id) for problem_id in examiner.problems]
     if len(problems) == 0:
         response += f"Задач нет\n"
     else:
@@ -453,6 +453,21 @@ def add_examiner(message: Message):
         problems = problems, ok_if_user_exists = True
     )
     bot.send_message(message.chat.id, f"{examiner.name} {examiner.surname} добавлен(-а) в список принимающих")
+
+
+@bot.message_handler(commands=['set_examiner_problems'], roles=['owner'])
+def set_examiner_problems(message: Message):
+    if not current_olymp:
+        raise UserError("Нет текущей олимпиады")
+    tg_handle, problems = get_n_args(message, 2, 2, "Необходимо указать Телеграм-хэндл принимающего и задачи")
+    problems = list(map(int, problems.split())) if problems[0] != '0' else None
+    examiner: Examiner = Examiner.from_tg_handle(tg_handle, current_olymp.id)
+    examiner.set_problems(problems)
+    examiner_response = "Твой список задач обновлён:\n"
+    for problem_id in problems:
+        examiner_response += f"- _{escape_markdown(Problem.from_id(problem_id).name)}_\n"
+    bot.send_message(examiner.tg_id, examiner_response)
+    bot.send_message(message.chat.id, f"Список задач принимающего {examiner.name} {examiner.surname} обновлён")
 
 
 @bot.message_handler(commands=['olymp_info'], roles=['owner'])
