@@ -558,10 +558,10 @@ def update_queue_entry_status(message: Message):
     if status == queue_entry.status:
         raise UserError(f"Статус уже {status_text.capitalize()}")
     queue_entry.status = status
-    announce_queue_entry(queue_entry)
     if message.reply_to_message:
         participant: Participant = Participant.from_id(queue_entry.participant_id)
         bot.send_message(participant.tg_id, message.reply_to_message.text)
+    announce_queue_entry(queue_entry)
 
 
 
