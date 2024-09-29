@@ -74,10 +74,18 @@ class Olymp:
 
 
     @provide_cursor
+    def __amount(self, table: str, *, cursor: sqlite3.Cursor | None = None) -> int:
+        cursor.execute(f"SELECT 1 FROM {table} WHERE olymp_id = ?", (self.id,))
+        return len(cursor.fetchall())
+
+    @provide_cursor
     def get_participants(self, *, cursor: sqlite3.Cursor | None = None) -> list[Participant]:
         cursor.execute("SELECT user_id FROM participants WHERE olymp_id = ?", (self.id,))
         results = cursor.fetchall()
         return [Participant.from_user_id(user_id_tuple[0], self.id) for user_id_tuple in results]
+    
+    def participants_amount(self) -> int:
+        return self.__amount("participants")
     
     @provide_cursor
     def get_examiners(self, *, only_free: bool = False, order_by_busyness: bool = False, cursor: sqlite3.Cursor | None = None) -> list[Participant]:
@@ -90,11 +98,17 @@ class Olymp:
         results = cursor.fetchall()
         return [Examiner.from_user_id(user_id_tuple[0], self.id) for user_id_tuple in results]
     
+    def examiners_amount(self) -> int:
+        return self.__amount("examiners")
+    
     @provide_cursor
     def get_problems(self, *, cursor: sqlite3.Cursor | None = None) -> list[Problem]:
         cursor.execute("SELECT * FROM problems WHERE olymp_id = ? ORDER BY id", (self.id,))
         results = cursor.fetchall()
         return [Problem(*fetch) for fetch in results]
+    
+    def problems_amount(self) -> int:
+        return self.__amount("problems")
 
 
     def __set(self, column: str, value):

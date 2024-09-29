@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import re
+import json
 from db import create_update_db
 from data import TOKEN, OWNER_ID, OWNER_HANDLE
 import telebot
@@ -15,6 +16,7 @@ from queue_entry import QueueEntry, QueueStatus
 from utils import UserError, decline, get_arg, get_n_args, get_file
 import pandas as pd
 from io import BytesIO
+from prettytable import from_json
 
 
 PROMOTE_COMMANDS = False # Подсказывать ли команды участникам
@@ -63,6 +65,8 @@ class RolesFilter(AdvancedCustomFilter): # owner, examiner, participant
     def check(message: Message, roles: list[str]):
         if 'owner' in roles and message.from_user.id == OWNER_ID:
             return True
+        if 'not owner' in roles and message.from_user.id != OWNER_ID:
+            return True
         if not current_olymp:
             return False
         if 'examiner' in roles and Examiner.from_tg_id(message.from_user.id, current_olymp.id, no_error=True):
@@ -97,10 +101,10 @@ current_olymp = Olymp.current()
 
 
 participant_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-participant_keyboard.add("Записаться в очередь")
+participant_keyboard.add("Записаться в очередь", "Мои успехи")
 
 participant_keyboard_in_queue = ReplyKeyboardMarkup(resize_keyboard=True)
-participant_keyboard_in_queue.add("Покинуть очередь")
+participant_keyboard_in_queue.add("Покинуть очередь", "Мои успехи")
 
 def participant_keyboard_choose_problem(participant: Participant):
     buttons = {f"{i+1}: {problem.name}": {'callback_data': f'join_queue_{i+1}'} 
@@ -110,20 +114,25 @@ def participant_keyboard_choose_problem(participant: Participant):
 
 
 @bot.message_handler(
-    commands=['start', 'authenticate'], 
-    olymp_statuses = [None, OlympStatus.TBA, OlympStatus.REGISTRATION, OlympStatus.CONTEST]
+    commands=['start', 'help'],
+    roles=['not owner'],
+    olymp_statuses=[None, OlympStatus.TBA]
 )
-def send_welcome(message: Message):
-    if not current_olymp or current_olymp.status == OlympStatus.TBA:
-        response = ("Привет!\n"
-                    "Пока что никакой олимпиады нет, но ты можешь следить за обновлениями "
-                    "в каналах УОЛ и Лингвокружка:\n"
-                    "- ВКонтакте: vk.com/hseling.for.school\n"
-                    "- Телеграм: t.me/hselingforschool\n"
-                    "- Сайт: ling.hse.ru/junior")
-        bot.send_message(message.chat.id, response)
-        return
-    
+def lost(message: Message):
+    response = ("Привет!\n"
+                "Пока что никакой олимпиады нет, но ты можешь следить за обновлениями "
+                "в каналах УОЛ и Лингвокружка:\n"
+                "- ВКонтакте: vk.com/hseling.for.school\n"
+                "- Телеграм: t.me/hselingforschool\n"
+                "- Сайт: ling.hse.ru/junior")
+    bot.send_message(message.chat.id, response)
+
+
+@bot.message_handler(
+    commands=['start', 'authenticate'], 
+    olymp_statuses = [OlympStatus.REGISTRATION, OlympStatus.CONTEST]
+)
+def send_welcome(message: Message):    
     olymp_id = current_olymp.id
     tg_id = message.from_user.id
     member: Participant | Examiner | None = \
@@ -136,6 +145,7 @@ def send_welcome(message: Message):
             response += "\nЧтобы выбрать задачи для приёма, используй команду /choose\_problems"
         bot.send_message(message.chat.id, response)
         return
+    
     tg_handle = message.from_user.username or message.from_user.id
     new_member: Participant | Examiner | None = \
         Participant.from_tg_handle(tg_handle, olymp_id, no_error=True) or Examiner.from_tg_handle(tg_handle, olymp_id, no_error=True)
@@ -204,6 +214,85 @@ def handle_change_handler(callback_query: CallbackQuery):
             return
 
 
+@bot.message_handler(commands=['help'], roles=['owner', 'examiner', 'participant'])
+def help(message: Message):
+    commands = [[["help", "Показать список команд"]]]
+    roles = []
+    if message.from_user.id == OWNER_ID:
+        roles.append('owner')
+    if current_olymp and Examiner.from_tg_id(message.from_user.id, current_olymp.id, no_error=True):
+        roles.append('examiner')
+    if current_olymp and Participant.from_tg_id(message.from_user.id, current_olymp.id, no_error=True):
+        roles.append('participant')
+    if len(roles) == 0:
+        raise UserError("Пользователь не найден. Если ты участник или принимающий, пвторизуйся при помощи команды /start")
+    role_titles = len(roles) > 1
+    for role in roles:
+        with open(os.path.join("help", f"{role}.json"), encoding="utf8") as f:
+            data = json.load(f)
+        if role_titles:
+            commands.append(data["title"])
+        commands += data["commands"]
+    response = ""
+    for block in commands:
+        if isinstance(block, str):
+            response += f"*{block}*\n\n"
+            continue
+        for command_description in block:
+            command, description = tuple(command_description)
+            command = escape_markdown("/" + command) if (" " not in command) else f"`/{command}`"
+            response += command + " — " + description + "\n"
+        response += "\n"
+    bot.send_message(message.chat.id, response)
+
+
+@bot.message_handler(
+    regexp=r"/my_stats|Мои успехи", 
+    roles=['participant'], 
+    olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE, OlympStatus.RESULTS]
+)
+def participant_stats(message: Message):
+    participant: Participant = Participant.from_tg_id(message.from_user.id, current_olymp.id)
+    response = f"Информация о сдачах задач:\n"
+    sum = 0
+    for i, problem in enumerate(participant.problems()):
+        response += f"- *{i+1}: _{escape_markdown(problem.name)}_* — "
+        attempts = participant.attempts_left(problem)
+        if participant.solved(problem): 
+            response += "решена\n"
+            sum += attempts
+        else:
+            response += (f"не решена, {decline(attempts, 'остал', ('ась', 'ось', 'ось'))} "
+                         f"{attempts} {decline(attempts, 'попыт', ('ка', 'ки', 'ок'))} из 3\n")
+    response += f"Набрано баллов: *{sum}*"
+    bot.send_message(message.chat.id, response)
+
+
+@bot.message_handler(
+    commands=["my_info"],
+    roles=['examiner'],
+    olymp_statuses=[OlympStatus.REGISTRATION, OlympStatus.CONTEST, OlympStatus.QUEUE, OlympStatus.RESULTS]
+)
+def examiner_stats(message: Message):
+    examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
+    response = (f"Информация о тебе:\n"
+                f"{examiner.display_data(contact_note=False)}\n")
+    problems = [Problem.from_id(problem_id) for problem_id in examiner.problmes]
+    if len(problems) == 0:
+        response += f"Задач нет\n"
+    else:
+        response += f"*Задачи:*\n"
+        for problem_id in examiner.problems:
+            problem = Problem.from_id(problem_id)
+            response += f"- _{escape_markdown(problem.name)}_\n"
+    if current_olymp.status != OlympStatus.REGISTRATION:
+        response += (
+            f"*Статус:* {'занят(-а)' if examiner.is_busy else 'свободен(-на)'}\n"
+            f"*Обсуждений с участниками:* {examiner.busyness_level}"
+        )
+    bot.send_message(message.chat.id, response)
+
+
 @bot.message_handler(commands=['olymp_registration_start', 'olymp_reg_start'], roles=['owner'])
 def olymp_reg_start(message: Message):
     if not current_olymp:
@@ -235,7 +324,8 @@ def olymp_start(message: Message):
             bot.send_document(
                 p.tg_id, 
                 document=InputFile(problem_block.path, "Блок_1.pdf"),
-                caption="Олимпиада началась! Можешь приступать к решению задач"
+                caption="Олимпиада началась! Можешь приступать к решению задач",
+                reply_markup=participant_keyboard
             )
     examiners = current_olymp.get_examiners()
     for e in examiners:
@@ -370,9 +460,15 @@ def olymp_info(message: Message):
     if not current_olymp:
         response = f"Нет текущей олимпиады"
     else:
+        p_amount = current_olymp.participants_amount()
+        e_amount = current_olymp.examiners_amount()
+        pr_amount = current_olymp.participants_amount()
         response = (f"Олимпиада _{current_olymp.name}_:\n"
                     f"ID: `{current_olymp.id}`\n"
-                    f"Состояние: `{current_olymp.status.name}`")
+                    f"Состояние: `{current_olymp.status.name}`\n"
+                    f"{p_amount} {decline(p_amount, 'участник', ('', 'а', 'ов'))}\n"
+                    f"{e_amount} {decline(e_amount, 'принимающ', ('ий', 'их', 'их'))}\n"
+                    f"{pr_amount} {decline(pr_amount, 'задач', ('а', 'и', ''))}")
     bot.send_message(message.chat.id, response)
 
 

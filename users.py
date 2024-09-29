@@ -380,8 +380,8 @@ class Participant(OlympMember):
         user_id: int | None = None,
         tg_id: int | None = None,
         tg_handle: str | None = None,
-        error_user_not_found: str | None = ("Участник не найден. Если вы участник, "
-                                            "авторизуйтесь при помощи команды /start.")
+        error_user_not_found: str | None = ("Участник не найден. Если ты участник, "
+                                            "авторизуйся при помощи команды /start.")
     ):
         participant = super().from_db(
             olymp_id,
@@ -407,8 +407,10 @@ class Participant(OlympMember):
         return super().from_id(id, "participants", error_user_not_found="Участник не найден")
 
 
-    def display_data(self):
-        return f"{self.name} {self.surname}, {self.grade} класс\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLE}"
+    def display_data(self, contact_note: bool = False):
+        response = f"{self.name} {self.surname}, {self.grade} класс"
+        if contact_note: response += f"\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLE}"
+        return response
     
     def problem_block_from_number(self, number: int):
         block_type = BlockType[('JUNIOR' if self.is_junior else 'SENIOR') + '_' + str(number)]
@@ -485,6 +487,11 @@ class Participant(OlympMember):
         return value_exists("queue", {"participant_id": self.id, "problem_id": problem.id, "status": QueueStatus.SUCCESS})
 
     def attempts_left(self, problem: Problem | int):
+        """
+        Считает, сколько осталось попыток. Потраченными попытками считаются только неуспешные сдачи,
+        успешные попытки не учитываются. Например, если участник сдал задачу со второй попытки,
+        он потратил две попытки из трёх, но метод `Participant.attempts_left` вернёт `2`.
+        """
         if isinstance(problem, int):
             problem = self.problem_from_number(problem)
         with sqlite3.connect(DATABASE) as conn:
@@ -625,8 +632,8 @@ class Examiner(OlympMember):
         user_id: int | None = None,
         tg_id: int | None = None,
         tg_handle: str | None = None,
-        error_user_not_found: str | None = ("Принимающий не найден. Если вы принимающий, "
-                                            "авторизуйтесь при помощи команды /start.")
+        error_user_not_found: str | None = ("Принимающий не найден. Если ты принимающий, "
+                                            "авторизуйся при помощи команды /start.")
     ):
         examiner = super().from_db(
             olymp_id,
@@ -658,8 +665,10 @@ class Examiner(OlympMember):
         return super().from_id(id, "examiners", error_user_not_found="Принимающий не найден")
 
 
-    def display_data(self):
-        return f"{self.name} {self.surname}, ссылка: {self.conference_link}\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLE}"
+    def display_data(self, contact_note: bool = True):
+        response = f"{self.name} {self.surname}, ссылка: {self.conference_link}"
+        if contact_note: response += f"\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLE}"
+        return response
     
     def assign_to_queue_entry(self, queue_entry: QueueEntry):
         if self.queue_entry:
