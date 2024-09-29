@@ -43,7 +43,7 @@ class Olymp:
         """
         exists = value_exists("olymps", {"name": name})
         if exists:
-            raise ValueError(f"Олимпиада {name} уже есть в базе")
+            raise UserError(f"Олимпиада {name} уже есть в базе")
         values = (name, status)
         cursor.execute("INSERT INTO olymps(name, status) VALUES (?, ?)", values)
         cursor.connection.commit()

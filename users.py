@@ -44,11 +44,11 @@ class User:
             tg_handle = tg_handle[1:]
         exists = value_exists("users", {"tg_handle": tg_handle})
         if exists and not ok_if_exists:
-            raise ValueError(f"Пользователь @{tg_handle} уже есть в базе")
+            raise UserError(f"Пользователь @{tg_handle} уже есть в базе")
         if tg_id:
             exists = exists or value_exists("users", {"tg_id": tg_id})
             if exists and not ok_if_exists:
-                raise ValueError(f"Пользователь с Telegram ID {tg_id} уже есть в базе")
+                raise UserError(f"Пользователь с Telegram ID {tg_id} уже есть в базе")
         if not exists:
             cursor.execute(
                 "INSERT INTO users(tg_id, tg_handle, name, surname) VALUES (?, ?, ?, ?)", 
@@ -437,7 +437,7 @@ class Participant(OlympMember):
                 continue
             problem_number = block.problems.index(problem)
             return (block_number - 1) * 3 + problem_number + 1
-        raise ValueError(f"Задача {problem.id} не дана участнику {self.id}")
+        raise UserError(f"Задача {problem.id} не дана участнику {self.id}")
 
     def should_get_new_problem(self, problem: Problem | int):
         if not self.has_problem(problem):
@@ -663,9 +663,9 @@ class Examiner(OlympMember):
     
     def assign_to_queue_entry(self, queue_entry: QueueEntry):
         if self.queue_entry:
-            raise ValueError(f"Принимающий {self.id} уже есть в очереди (запись {self.queue_entry.id})")
+            raise UserError(f"Принимающий {self.id} уже есть в очереди (запись {self.queue_entry.id})")
         if queue_entry.status != QueueStatus.WAITING:
-            raise ValueError(f"Нельзя записать принимающего в очередь на запись не со статусом ожидания")
+            raise UserError(f"Нельзя записать принимающего в очередь на запись не со статусом ожидания")
         queue_entry.examiner_id = self.id
         queue_entry.status = QueueStatus.DISCUSSING
         self.is_busy = True
@@ -673,10 +673,10 @@ class Examiner(OlympMember):
 
     def withdraw_from_queue_entry(self):
         if not self.queue_entry:
-            raise ValueError(f"Принимающий {self.id} не в очереди")
+            raise UserError(f"Принимающий {self.id} не в очереди")
         queue_entry = self.queue_entry
         if queue_entry.status != QueueStatus.DISCUSSING:
-            raise ValueError("Нельзя списать принимающего с уже завершённой записи")
+            raise UserError("Нельзя списать принимающего с уже завершённой записи")
         queue_entry.status = QueueStatus.WAITING
         queue_entry.examiner_id = None
         self.busyness_level -= 1
