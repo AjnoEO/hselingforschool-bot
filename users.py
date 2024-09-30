@@ -334,6 +334,7 @@ class Participant(OlympMember):
         olymp_id: int,        
         *,
         last_block_number: int | None = None,
+        ok_if_exists: bool = False,
         cursor: sqlite3.Cursor | None = None,
     ):
         """
@@ -344,14 +345,18 @@ class Participant(OlympMember):
         else:
             user_id = user
         exists = value_exists("participants", {"user_id": user_id, "olymp_id": olymp_id})
-        if exists:
+        if exists and not ok_if_exists:
             raise UserError(f"Пользователь {user_id} уже участник олимпиады {olymp_id}")
-        q = (f"INSERT INTO participants(user_id, olymp_id, grade"
-             f"{(', last_block_number' if last_block_number else '')}) VALUES "
-             f"(?, ?, ?{', ?' if last_block_number else ''})")
-        p = [user_id, olymp_id, grade]
-        if last_block_number:
-            p.append(last_block_number)
+        if exists:
+            q = (f"UPDATE participants SET olymp_id = ?, grade = ?"
+                 f"{', last_block_number = ?' if last_block_number else ''} "
+                 f"WHERE user_id = ?")
+            p = [olymp_id, grade] + ([last_block_number] if last_block_number else []) + [user_id]
+        else:
+            q = (f"INSERT INTO participants(user_id, olymp_id, grade"
+                f"{', last_block_number' if last_block_number else ''}) VALUES "
+                f"(?, ?, ?{', ?' if last_block_number else ''})")
+            p = [user_id, olymp_id, grade] + ([last_block_number] if last_block_number else [])
         cursor.execute(q, tuple(p))
         cursor.connection.commit()
         return Participant.from_user_id(user_id, olymp_id)
@@ -369,13 +374,17 @@ class Participant(OlympMember):
         tg_id: int | None = None,
         last_block_number: int | None = None,
         ok_if_user_exists: bool = False,
+        ok_if_exists: bool = False,
         cursor: sqlite3.Cursor | None = None,
     ):
         """
         Добавить пользователя в таблицу users и добавить его как участника в таблицу participants
         """
         user = User.create(tg_handle, name, surname, tg_id=tg_id, ok_if_exists=ok_if_user_exists, cursor=cursor)
-        return Participant.create_for_existing_user(user, grade, olymp_id, last_block_number=last_block_number, cursor=cursor)
+        return Participant.create_for_existing_user(
+            user, grade, olymp_id, last_block_number=last_block_number, 
+            ok_if_exists=ok_if_exists, cursor=cursor
+        )
     
     @classmethod
     def from_db(
@@ -577,6 +586,7 @@ class Examiner(OlympMember):
         problems: list[int] | None = None,
         busyness_level: int = 0,
         is_busy: bool = True,
+        ok_if_exists: bool = False,
         cursor: sqlite3.Cursor | None = None,
     ):
         """
@@ -587,12 +597,18 @@ class Examiner(OlympMember):
         else:
             user_id = user
         exists = value_exists("examiners", {"user_id": user_id, "olymp_id": olymp_id})
-        if exists:
+        if exists and not ok_if_exists:
             raise UserError(f"Пользователь {user_id} уже проверяющий в олимпиаде {olymp_id}")
-        cursor.execute(
-            "INSERT INTO examiners(user_id, olymp_id, conference_link, busyness_level, is_busy) VALUES (?, ?, ?, ?, ?)", 
-            (user_id, olymp_id, conference_link, busyness_level, int(is_busy))
-        )
+        if exists:
+            cursor.execute(
+                "UPDATE examiners SET olymp_id = ?, conference_link = ?, busyness_level = ?, is_busy = ? WHERE user_id = ?",
+                (olymp_id, conference_link, busyness_level, int(is_busy), user_id)
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO examiners(user_id, olymp_id, conference_link, busyness_level, is_busy) VALUES (?, ?, ?, ?, ?)",
+                (user_id, olymp_id, conference_link, busyness_level, int(is_busy))
+            )
         examiner_id = cursor.lastrowid
         if problems and len(problems) > 0:
             q = "INSERT INTO examiner_problems(examiner_id, problem_id) VALUES " + ", ".join(["(?, ?)"] * len(problems))
@@ -618,6 +634,7 @@ class Examiner(OlympMember):
         busyness_level: int = 0,
         is_busy: bool = True,
         ok_if_user_exists: bool = False,
+        ok_if_exists: bool = False,
         cursor: sqlite3.Cursor | None = None,
     ):
         """
@@ -626,7 +643,7 @@ class Examiner(OlympMember):
         user = User.create(tg_handle, name, surname, tg_id=tg_id, ok_if_exists=ok_if_user_exists, cursor=cursor)
         return Examiner.create_for_existing_user(
             user, conference_link, olymp_id, problems=problems,
-            busyness_level=busyness_level, is_busy=is_busy, cursor=cursor
+            busyness_level=busyness_level, is_busy=is_busy, ok_if_exists=ok_if_exists, cursor=cursor
         )
     
     @classmethod

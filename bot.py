@@ -436,8 +436,9 @@ def olymp_create(message: Message):
     bot.send_message(message.chat.id, f"Олимпиада <em>{current_olymp.name}</em> успешно создана")
 
 
-def upload_members(message: Message, required_columns: list[str], member_class: type[OlympMember],
+def upload_members(message: Message, required_key: str, key_name: str, member_class: type[OlympMember],
                    term_stem: str, term_endings: tuple[str], term_endings_gen: tuple[str]):
+    required_columns = ["name", "surname", "tg_handle", required_key]
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
     if current_olymp.status != OlympStatus.TBA:
@@ -445,31 +446,46 @@ def upload_members(message: Message, required_columns: list[str], member_class: 
     file_data = get_file(message, bot, "Необходимо указать Excel-таблицу")
     member_table = pd.read_excel(BytesIO(file_data))
     if not set(member_table.columns).issubset(set(required_columns)):
-        raise UserError("Таблица должна содержать столбцы " + ', '.join([f'`{col}`' for col in required_columns]))
-    updated_users: list[tuple[User, member_class]] = []
+        raise UserError("Таблица должна содержать столбцы " + ', '.join([f'<code>{col}</code>' for col in required_columns]))
+    old_members_amount = 0
+    updated_users: list[tuple[User | member_class, member_class]] = []
     for _, m in member_table.iterrows():
+        m["tg_handle"] = str(m["tg_handle"])
         old_user = None
         if user := User.from_tg_handle(m["tg_handle"], no_error=True):
             if user.name != m["name"] or user.surname != m["surname"]:
                 old_user = user
-        member: member_class = member_class.create_as_new_user(**m, olymp_id=current_olymp.id, ok_if_user_exists=True)
+        if member := member_class.from_tg_handle(m["tg_handle"], current_olymp.id, no_error=True):
+            value = member._additional_values[required_key]
+            if value != m[required_key]:
+                old_user = member
+            old_members_amount += 1
+        member: member_class = member_class.create_as_new_user(**m, olymp_id=current_olymp.id, ok_if_user_exists=True, ok_if_exists=True)
         if old_user:
             updated_users.append((old_user, member))
-    amount = member_table.shape[0]
+    amount = member_table.shape[0] - old_members_amount
     response = (f"{amount} {decline(amount, term_stem, term_endings)} успешно "
                 f"{decline(amount, 'добавлен', ('', 'ы', 'ы'))} в олимпиаду <em>{current_olymp.name}</em>")
+    if old_members_amount > 0:
+        response += (f"\n{old_members_amount} {decline(old_members_amount, term_stem, term_endings)} "
+                     f"уже {decline(old_members_amount, 'был', ('', 'и', 'и'))} зарегистрированы в олимпиаде")
     updated_amount = len(updated_users)
     if updated_amount > 0:
         response += f"\nУ {updated_amount} {decline(updated_amount, term_stem, term_endings_gen)} обновилась информация:"
         for old_user, member in updated_users:
-            response += f"\n- {old_user.name} {old_user.surname} → {member.name} {member.surname} (@{member.tg_handle})"
+            if isinstance(old_user, member_class):
+                response += (f"\n- {old_user.name} {old_user.surname}, {key_name}: {old_user._additional_values[required_key]} "
+                             f"→ {member.name} {member.surname}, {key_name}: {member._additional_values[required_key]} "
+                             f"(@{member.tg_handle})")
+            else:
+                response += f"\n- {old_user.name} {old_user.surname} → {member.name} {member.surname} (@{member.tg_handle})"
     bot.send_message(message.chat.id, response)
 
 
 @bot.message_handler(commands=['upload_participants'], roles=['owner'], content_types=['text', 'document'])
 def upload_participants(message: Message):
     upload_members(
-        message, ["name", "surname", "tg_handle", "grade"], 
+        message, "grade", "Класс",
         Participant, 'участник', ('', 'а', 'ов'), ('а', 'ов', 'ов')
     )
 
@@ -477,7 +493,7 @@ def upload_participants(message: Message):
 @bot.message_handler(commands=['upload_examiners'], roles=['owner'], content_types=['text', 'document'])
 def upload_examiners(message: Message):
     upload_members(
-        message, ["name", "surname", "tg_handle", "conference_link"],
+        message, "conference_link", "Ссылка на конференцию",
         Examiner, 'принимающ', ('ий', 'их', 'их'), ('его', 'их', 'их')
     )
 
@@ -851,7 +867,10 @@ def examiner_chooses_problem(message: Message):
     bot.register_next_step_handler_by_chat_id(message.chat.id, examiner_chooses_problem)
 
 
-@bot.message_handler(commands=['free', 'busy'], roles=['examiner'], olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE], discussing_examiner=False)
+@bot.message_handler(
+    commands=['free', 'busy'], roles=['examiner'], 
+    olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE], discussing_examiner=False
+)
 def examiner_busyness_status(message: Message):
     examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
     command = extract_command(message.text)
@@ -969,7 +988,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
     bot.send_message(
         participant.tg_id, 
         participant_response, 
-        reply_markup=quick_markup({'Принимающий не пришёл': {'callback_data': 'examiner_didnt_come'}}) if NO_EXAMINER_COMPLAINTS else None 
+        reply_markup=quick_markup({'Принимающий не пришёл': {'callback_data': 'examiner_didnt_come'}}) if NO_EXAMINER_COMPLAINTS else None
     )
     examiner_response = (f"К тебе идёт сдавать задачу <em>{escape_html(problem.name)}</em> "
                          f"участник {participant.name} {participant.surname} ({participant.grade} класс). "
@@ -1253,7 +1272,7 @@ def give_problem_block(message: Message):
 def other_commands(message: Message):
     raise UserError("Неизвестная команда")
 
-@bot.message_handler()
+@bot.message_handler(roles=['not owner'])
 def other_messages(message: Message):
     raise UserError("Неизвестная команда\n"
                     "Если у тебя есть организационные вопросы касательно олимпиады, "
