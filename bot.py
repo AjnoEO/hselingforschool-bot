@@ -148,7 +148,7 @@ def send_welcome(message: Message):
         send_authentication_confirmation(member, already_authenticated=True)
         return
     
-    tg_handle = message.from_user.username or message.from_user.id
+    tg_handle = message.from_user.username or str(message.from_user.id)
     new_member: Participant | Examiner | None = \
         Participant.from_tg_handle(tg_handle, olymp_id, no_error=True) or Examiner.from_tg_handle(tg_handle, olymp_id, no_error=True)
     user_old_handle = User.from_tg_id(tg_id, no_error=True)
