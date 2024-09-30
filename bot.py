@@ -268,9 +268,10 @@ def participant_stats(message: Message):
     for i, problem in enumerate(participant.problems()):
         response += f"- <strong>{i+1}: <em>{escape_html(problem.name)}</em></strong> — "
         attempts = participant.attempts_left(problem)
-        if participant.solved(problem): 
-            response += f"решена ({attempts} {decline(attempts, 'балл', ('', 'а', 'ов'))})\n"
-            sum += attempts
+        if participant.solved(problem):
+            points = (2+(i//3)*2) + attempts
+            response += f"решена ({points} {decline(attempts, 'балл', ('', 'а', 'ов'))})\n"
+            sum += points
         else:
             response += (f"не решена, {decline(attempts, 'остал', ('ась', 'ось', 'ось'))} "
                          f"{attempts} {decline(attempts, 'попыт', ('ка', 'ки', 'ок'))} из 3\n")
@@ -545,8 +546,8 @@ def add_examiner(message: Message):
     bot.send_message(message.chat.id, f"{examiner.name} {examiner.surname} добавлен(-а) в список принимающих")
 
 
-@bot.message_handler(commands=['edit_participant'], roles=['owner'])
-def edit_participant(message: Message):
+@bot.message_handler(commands=['edit_examiner'], roles=['owner'])
+def edit_examiner(message: Message):
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
     syntax_hint = ("Синтаксис команды: <code>"
