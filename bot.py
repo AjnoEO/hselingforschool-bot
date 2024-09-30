@@ -19,7 +19,7 @@ from io import BytesIO
 
 
 PROMOTE_COMMANDS = False # Подсказывать ли команды участникам
-NO_EXAMINER_COMPLAINTS = True # Давать ли участникам возможность пожаловаться на то, что принимающий не пришёл
+NO_EXAMINER_COMPLAINTS = False # Давать ли участникам возможность пожаловаться на то, что принимающий не пришёл
 
 
 create_update_db()
@@ -99,11 +99,18 @@ bot.add_custom_filter(DiscussingExaminerFilter())
 current_olymp = Olymp.current()
 
 
+JOIN_QUEUE_BUTTON = "Сдать задачу"
+LEAVE_QUEUE_BUTTON = "Покинуть очередь"
+MY_STATS_BUTTON = "Мои задачи"
+
 participant_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
-participant_keyboard.add("Записаться в очередь", "Мои успехи")
+participant_keyboard.add(JOIN_QUEUE_BUTTON, MY_STATS_BUTTON)
 
 participant_keyboard_in_queue = ReplyKeyboardMarkup(resize_keyboard=True)
-participant_keyboard_in_queue.add("Покинуть очередь", "Мои успехи")
+participant_keyboard_in_queue.add(LEAVE_QUEUE_BUTTON, MY_STATS_BUTTON)
+
+participant_keyboard_olymp_finished = ReplyKeyboardMarkup(resize_keyboard=True)
+participant_keyboard_olymp_finished.add(MY_STATS_BUTTON)
 
 def participant_keyboard_choose_problem(participant: Participant):
     buttons = {f"{i+1}: {problem.name}": {'callback_data': f'join_queue_{i+1}'} 
@@ -113,17 +120,18 @@ def participant_keyboard_choose_problem(participant: Participant):
 
 
 @bot.message_handler(
-    commands=['start', 'help'],
+    commands=['start', 'help', 'authenticate'],
     roles=['not owner'],
     olymp_statuses=[None, OlympStatus.TBA]
 )
 def lost(message: Message):
-    response = ("Привет!\n"
-                "Пока что никакой олимпиады нет, но ты можешь следить за обновлениями "
-                "в каналах УОЛ и Лингвокружка:\n"
+    response = ("Привет! Я бот для проведения <strong>Устной олимпиады по лингвистике (УОЛ)</strong>\n"
+                "Пока что олимпиады нет. О регистрации на олимпиаду и дате её начала "
+                "мы объявляем в каналах УОЛ и Лингвокружка:\n"
                 "- ВКонтакте: vk.com/hseling.for.school\n"
                 "- Телеграм: t.me/hselingforschool\n"
-                "- Сайт: ling.hse.ru/junior")
+                "- Сайт: ling.hse.ru/junior\n"
+                "Подписывайся и ожидай информации там")
     bot.send_message(message.chat.id, response)
 
 
@@ -131,22 +139,13 @@ def lost(message: Message):
     commands=['start', 'authenticate'], 
     olymp_statuses = [OlympStatus.REGISTRATION, OlympStatus.CONTEST]
 )
-def send_welcome(message: Message):    
+def send_welcome(message: Message):
     olymp_id = current_olymp.id
     tg_id = message.from_user.id
     member: Participant | Examiner | None = \
         Participant.from_tg_id(tg_id, olymp_id, no_error=True) or Examiner.from_tg_id(tg_id, olymp_id, no_error=True)
     if member:
-        response = ("Ты уже авторизован(-а) как "
-                    + ("участник" if isinstance(member, Participant) else "принимающий")
-                    + "!\n" + member.display_data())
-        if isinstance(member, Examiner):
-            if not current_olymp.status == OlympStatus.CONTEST:
-                response += "\nЧтобы выбрать задачи для приёма, используй команду /choose_problems"
-            elif member.is_busy:
-                response += "\nЧтобы начать принимать задачи, используй команду /free"
-            response += "\nЧтобы просмотреть информацию о себе, используй комануд /my_info"
-        bot.send_message(message.chat.id, response)
+        send_authentication_confirmation(member, already_authenticated=True)
         return
     
     tg_handle = message.from_user.username or message.from_user.id
@@ -172,20 +171,7 @@ def send_welcome(message: Message):
     
     if new_member:
         new_member.tg_id = tg_id
-        response = ("Ты успешно авторизовался(-лась) как "
-                    + ("участник" if isinstance(new_member, Participant) else "принимающий")
-                    + "!\n" + new_member.display_data())
-        if isinstance(member, Examiner) and not current_olymp.status == OlympStatus.CONTEST:
-            response += "\nЧтобы выбрать задачи для приёма, используй команду /choose_problems"
-        bot.send_message(message.chat.id, response)
-        if current_olymp.status != OlympStatus.CONTEST or isinstance(new_member, Examiner):
-            return
-        for problem_block_number in range(1, new_member.last_block_number+1):
-            problem_block = new_member.problem_block_from_number(problem_block_number)
-            bot.send_document(
-                message.chat.id,
-                InputFile(problem_block.path, f"Блок_{problem_block_number}.pdf")
-            )
+        send_authentication_confirmation(new_member)
         return
     
     bot.send_message(message.chat.id, f"Пользователь не найден. Если ты регистрировался(-лась) на олимпиаду, напиши {OWNER_HANDLE}")
@@ -207,14 +193,37 @@ def handle_change_handler(callback_query: CallbackQuery):
     member: Participant | Examiner | None = \
         Participant.from_user_id(user_id, olymp_id, no_error=True) or Examiner.from_user_id(user_id, olymp_id, no_error=True)
     if member:
-        response = ("Ты успешно авторизовался(-лась) как "
-                    + ("участник" if isinstance(member, Participant) else "принимающий")
-                    + "!\n" + member.display_data())
-        if isinstance(member, Examiner) and current_olymp and not current_olymp.status == OlympStatus.CONTEST:
-            response += "\nЧтобы выбрать задачи для приёма, используй команду /choose_problems"
-        bot.send_message(message.chat.id, response)
+        send_authentication_confirmation(member)
         bot.answer_callback_query(callback_query.id)
         return
+
+
+def send_authentication_confirmation(member: OlympMember, *, already_authenticated: bool = False):
+    response = (("Ты уже авторизован(-а) как " if already_authenticated else "Ты успешно авторизовался(-лась) как ")
+                + ("участник" if isinstance(member, Participant) else "принимающий")
+                + "!\n" + member.display_data())
+    if isinstance(member, Examiner):
+        if not current_olymp.status == OlympStatus.CONTEST:
+            response += "\nЧтобы выбрать задачи для приёма, используй команду /choose_problems"
+        elif member.is_busy:
+            response += "\nЧтобы начать принимать задачи, используй команду /free"
+        response += "\nЧтобы просмотреть информацию о себе, используй команду /my_info"
+    elif current_olymp.status == OlympStatus.REGISTRATION:
+        response += ("\nДата и время начала олимпиады есть в <a href=\"vk.com/hseling.for.school\">нашей группе ВКонтакте</a> "
+                     "и в <a href=\"t.me/hselingforschool\">нашем Телеграм-канале</a>\n"
+                     "Когда олимпиада начнётся, бот пришлёт тебе задания и ты сможешь записываться на сдачу задач через него")
+    bot.send_message(member.tg_id, response)
+    if current_olymp.status == OlympStatus.CONTEST and isinstance(member, Participant):
+        send_all_problem_blocks(member)
+
+
+def send_all_problem_blocks(participant: Participant):
+    for problem_block_number in range(1, participant.last_block_number+1):
+        problem_block = participant.problem_block_from_number(problem_block_number)
+        bot.send_document(
+            participant.tg_id,
+            InputFile(problem_block.path, f"Блок_{problem_block_number}.pdf")
+        )
 
 
 @bot.message_handler(commands=['help'], roles=['owner', 'examiner', 'participant'])
@@ -248,8 +257,8 @@ def help(message: Message):
 
 
 @bot.message_handler(
-    regexp=r"/my_stats|Мои успехи", 
-    roles=['participant'], 
+    regexp=rf"/my_stats|{MY_STATS_BUTTON}",
+    roles=['participant'],
     olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE, OlympStatus.RESULTS]
 )
 def participant_stats(message: Message):
@@ -266,7 +275,10 @@ def participant_stats(message: Message):
             response += (f"не решена, {decline(attempts, 'остал', ('ась', 'ось', 'ось'))} "
                          f"{attempts} {decline(attempts, 'попыт', ('ка', 'ки', 'ок'))} из 3\n")
     response += f"Набрано баллов: <strong>{sum}</strong>"
-    bot.send_message(message.chat.id, response)
+    bot.send_message(
+        message.chat.id, response,
+        reply_markup=ReplyKeyboardRemove() if current_olymp.status == OlympStatus.RESULTS else None
+    )
 
 
 @bot.message_handler(
@@ -305,7 +317,16 @@ def olymp_reg_start(message: Message):
     current_olymp.status = OlympStatus.REGISTRATION
     participants = current_olymp.get_participants()
     examiners = current_olymp.get_examiners()
-    # TODO: Рассылка уже зарегистрированным участникам и принимающим
+    for p in participants:
+        if p.tg_id:
+            p_message = (f"Мы запустили авторизацию в боте для онлайн-участников. Тебя авторизовали автоматически!\n"
+                         f"{p.display_data()}")
+            bot.send_message(p.tg_id, p_message)
+    for e in examiners:
+        if e.tg_id:
+            e_message = (f"Мы запустили авторизацию в боте. Тебя автоматически авторизовали как принимающего!\n"
+                         f"{e.display_data()}")
+            bot.send_message(e.tg_id, e_message)
     bot.send_message(message.chat.id, f"Регистрация на олимпиаду <em>{current_olymp.name}</em> запущена")
 
 
@@ -319,13 +340,15 @@ def olymp_start(message: Message):
         raise UserError("Олимпиада уже идёт или завершилась")
     current_olymp.status = OlympStatus.CONTEST
     participants = current_olymp.get_participants()
+    participant_message = (f"Олимпиада началась! Можешь приступать к решению задач\n"
+                           f"Если у тебя возникли вопросы, обращайся к {OWNER_HANDLE}")
     for p in participants:
         if p.tg_id:
             problem_block = p.last_block
             bot.send_document(
                 p.tg_id, 
                 document=InputFile(problem_block.path, "Блок_1.pdf"),
-                caption="Олимпиада началась! Можешь приступать к решению задач",
+                caption=participant_message,
                 reply_markup=participant_keyboard
             )
     examiners = current_olymp.get_examiners()
@@ -378,7 +401,7 @@ def olymp_finish(message: Message):
     else:
         for p in participants:
             if p.tg_id:
-                bot.send_message(p.tg_id, p_not_in_queue_message)
+                bot.send_message(p.tg_id, p_not_in_queue_message, reply_markup=participant_keyboard_olymp_finished)
         finish_olymp()
 
 
@@ -415,12 +438,12 @@ def upload_members(message: Message, required_columns: list[str], member_class: 
     bot.send_message(message.chat.id, response)
 
 
-@bot.message_handler(commands=['upload_participants'], roles=['owner'])
+@bot.message_handler(commands=['upload_participants'], roles=['owner'], content_types=['text', 'document'])
 def upload_participants(message: Message):
     upload_members(message, ["name", "surname", "tg_handle", "grade"], Participant, 'участник', ('', 'а', 'ов'))
 
 
-@bot.message_handler(commands=['upload_examiners'], roles=['owner'])
+@bot.message_handler(commands=['upload_examiners'], roles=['owner'], content_types=['text', 'document'])
 def upload_examiners(message: Message):
     upload_members(message, ["name", "surname", "tg_handle", "conference_link"], Examiner, 'принимающ', ('ий', 'их', 'их'))
 
@@ -478,7 +501,7 @@ def olymp_info(message: Message):
     else:
         p_amount = current_olymp.participants_amount()
         e_amount = current_olymp.examiners_amount()
-        pr_amount = current_olymp.participants_amount() # Почему-то говорит неправду
+        pr_amount = current_olymp.participants_amount() # TODO: Почему-то говорит неправду
         response = (f"Олимпиада <em>{current_olymp.name}</em>:\n"
                     f"<strong>ID:</strong> <code>{current_olymp.id}</code>\n"
                     f"<strong>Статус:</strong> <code>{current_olymp.status.name}</code>\n"
@@ -760,6 +783,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
     problem: Problem = Problem.from_id(queue_entry.problem_id)
     problem_number = participant.get_problem_number(problem)
     
+    # Нет принимающего
     if not queue_entry.examiner_id:
         if queue_entry.status == QueueStatus.WAITING:
             response = (f"Ты теперь в очереди на задачу {problem_number}: <em>{escape_html(problem.name)}</em>. "
@@ -778,7 +802,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
                 keyboard = participant_keyboard
             else:
                 response = "Ты больше не в очереди. Олимпиада завершена, можешь отправляться на заслуженный отдых"
-                keyboard = ReplyKeyboardRemove()
+                keyboard = participant_keyboard_olymp_finished
             bot.send_message(participant.tg_id, response, reply_markup=keyboard)
             if current_olymp.status == OlympStatus.QUEUE and not current_olymp.unhandled_queue_left():
                 finish_olymp()
@@ -786,6 +810,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
     
     examiner: Examiner = Examiner.from_id(queue_entry.examiner_id)
 
+    # Приём завершён
     if queue_entry.status not in QueueStatus.active():
         new_problem_block = None
         if queue_entry.status == QueueStatus.FAIL:
@@ -820,7 +845,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
             keyboard = participant_keyboard
         else:
             participant_response += "\nОлимпиада завершена, можешь отправляться на заслуженный отдых"
-            keyboard = ReplyKeyboardRemove()
+            keyboard = participant_keyboard_olymp_finished
         unhandled_queue_left = current_olymp.unhandled_queue_left()
         if current_olymp.status == OlympStatus.CONTEST or unhandled_queue_left:
             examiner_response += "\nЧтобы продолжить принимать задачи, используй команду /free"
@@ -838,13 +863,14 @@ def announce_queue_entry(queue_entry: QueueEntry):
             finish_olymp()
         return
     
+    # Принимающий только что назначен
     participant_response = (f"Задачу {problem_number}: <em>{escape_html(problem.name)}</em> "
                             f"у тебя примет {examiner.name} {examiner.surname}.\n"
                             f"Ссылка: {examiner.conference_link}")
     bot.send_message(
         participant.tg_id, 
         participant_response, 
-        reply_markup=quick_markup({'Принимающий не пришёл': {'callback_data': 'examiner_didnt_come'}} if NO_EXAMINER_COMPLAINTS else None)
+        reply_markup=quick_markup({'Принимающий не пришёл': {'callback_data': 'examiner_didnt_come'}}) if NO_EXAMINER_COMPLAINTS else None 
     )
     examiner_response = (f"К тебе идёт сдавать задачу <em>{escape_html(problem.name)}</em> "
                          f"участник {participant.name} {participant.surname} ({participant.grade} класс). "
@@ -863,7 +889,8 @@ def withdraw_examiner(message: Message):
     examiner.withdraw_from_queue_entry()
     examiner_response = (f"{participant.name} {participant.surname} пожаловался(-лась), что тебя не было на приёме задачи. "
                          f"Пожалуйста, используй команду /busy, если тебе надо отойти!\n"
-                         f"Бот установил тебе статус \"занят(-а)\". Когда вернёшься, используй команду /free, чтобы продолжить принимать задачи")
+                         f"Бот установил тебе статус \"занят(-а)\". "
+                         f"Когда вернёшься, используй команду /free, чтобы продолжить принимать задачи")
     bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
     queue_entry = participant.queue_entry
     new_examiner_id = queue_entry.look_for_examiner()
@@ -950,8 +977,9 @@ def examiner_didnt_come_handler(callback_query: CallbackQuery):
         bot.send_message(participant.tg_id, participant_response, reply_markup=participant_keyboard_in_queue)
 
 
-@bot.message_handler(regexp=r'(/queue( \d+)?|Записаться в очередь)', roles=['participant'], olymp_statuses=[OlympStatus.CONTEST])
+@bot.message_handler(regexp=rf'(/queue( \d+)?|{JOIN_QUEUE_BUTTON})', roles=['participant'], olymp_statuses=[OlympStatus.CONTEST])
 def queue(message: Message):
+    temp_reply = bot.send_message(message.chat.id, "Обработка запроса…", reply_markup=ReplyKeyboardRemove())
     participant: Participant = Participant.from_tg_id(message.from_user.id, current_olymp.id)
     if participant.queue_entry:
         problem = Problem.from_id(participant.queue_entry.problem_id)
@@ -959,15 +987,16 @@ def queue(message: Message):
         error_message = f"Ты уже в очереди на задачу {problem_number}: <em>{escape_html(problem.name)}</em>"
         if PROMOTE_COMMANDS:
             error_message += ". Чтобы покинуть очередь, используй команду /leave_queue"
+        bot.delete_message(temp_reply.chat.id, temp_reply.id)
         raise UserError(error_message, reply_markup=participant_keyboard_in_queue)
     if match := re.match(r"/queue (\d+)", message.text):
         match: re.Match
         problem_number = int(match.group(1))
+        bot.delete_message(temp_reply.chat.id, temp_reply.id)
         join_queue(participant, problem_number)
         return
+    bot.delete_message(temp_reply.chat.id, temp_reply.id)
     bot.send_message(message.chat.id, "Выбери задачу для сдачи", reply_markup=participant_keyboard_choose_problem(participant))
-    # reply = bot.send_message(message.chat.id, "Выбери задачу для сдачи", reply_markup=ReplyKeyboardRemove())
-    # bot.edit_message_reply_markup(reply.chat.id, reply.id, reply_markup=participant_keyboard_choose_problem(participant))
 
 
 @bot.callback_query_handler(
@@ -1005,7 +1034,11 @@ def join_queue(participant: Participant, problem_number: int):
     announce_queue_entry(queue_entry)
 
 
-@bot.message_handler(regexp=r'(/leave_queue|Покинуть очередь)', roles=['participant'], olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE])
+@bot.message_handler(
+    regexp=rf'(/leave_queue|{LEAVE_QUEUE_BUTTON})', 
+    roles=['participant'], 
+    olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE]
+)
 def leave_queue(message: Message):
     participant: Participant = Participant.from_tg_id(message.from_user.id, current_olymp.id)
     queue_entry = participant.queue_entry
@@ -1073,8 +1106,8 @@ def give_out_problem_block(message: Message):
             receivers += 1
             new_problem_block = p.give_next_problem_block()
             if p.tg_id:
-                participant_reply = (f"Тебе выдан {'второй' if last_block_number + 1 == 2 else 'третий'} блок задач. "
-                                     f"Теперь можешь сдавать и их!")
+                participant_reply = (f"Тебе выдан {'второй' if last_block_number + 1 == 2 else 'завершающий третий'} блок задач. "
+                                     f"Теперь можешь решать и сдавать их тоже!")
                 if PROMOTE_COMMANDS:
                     participant_reply += (f"\nЧтобы записаться на сдачу задачи, используй команду <code>"
                                           + escape_html("/queue <номер задачи>")
@@ -1100,8 +1133,8 @@ def give_problem_block(message: Message):
     if participant.last_block_number != new_problem_block_number - 1:
         raise UserError(f"Последний блок участника {participant.name} {participant.surname} — блок {participant.last_block_number}")
     problem_block = participant.give_next_problem_block()
-    participant_reply = (f"Тебе выдан {'второй' if participant.last_block_number == 2 else 'третий'} блок задач. "
-                         f"Теперь можешь сдавать и их!")
+    participant_reply = (f"Тебе выдан {'второй' if participant.last_block_number == 2 else 'завершающий третий'} блок задач. "
+                         f"Теперь можешь решать и сдавать их тоже!")
     if PROMOTE_COMMANDS:
         participant_reply += ("\nЧтобы записаться на сдачу задачи, используй команду <code>"
                               + escape_html("/queue <номер задачи>")
@@ -1115,6 +1148,18 @@ def give_problem_block(message: Message):
         message.chat.id,
         f"{'Второй' if new_problem_block_number == 2 else 'Третий'} блок задач выдан участнику {participant.name} {participant.surname}"
     )
+
+
+@bot.message_handler(regexp=r"/.+")
+def other_commands(message: Message):
+    raise UserError("Неизвестная команда")
+
+@bot.message_handler()
+def other_messages(message: Message):
+    raise UserError("Неизвестная команда\n"
+                    "Если у тебя есть организационные вопросы касательно олимпиады, "
+                    "пиши нам в <a href=\"vk.com/hseling.for.school\">группе ВКонтакте</a> "
+                    "и в <a href=\"t.me/hselingforschool\">Телеграм-канале</a>")
 
 
 print("Запускаю бота...")

@@ -3,8 +3,14 @@
     "commands": [
         [
             ["olymp_create <название>", "Создать олимпиаду"],
-            ["upload_participants", "Загрузить таблицу с участниками. Столбцы: `name`, `surname`, `grade`, `tg_handle`"],
-            ["upload_examiners", "Загрузить таблицу с принимающими. Столбцы: `name`, `surname`, `conference_link`, `tg_handle`"],
+            [
+                "upload_participants", 
+                "Загрузить таблицу с участниками. Столбцы: <block>name</block>, <block>surname</block>, <block>grade</block>, <block>tg_handle</block>"
+            ],
+            [
+                "upload_examiners", 
+                "Загрузить таблицу с принимающими. Столбцы: <block>name</block>, <block>surname</block>, <block>conference_link</block>, <block>tg_handle</block>"
+            ],
             ["problem_create <название>", "Создать задачу"],
             ["problem_rename <ID> <новое название>", "Переименовать задачу"],
             ["problem_block_create <задача1> <задача2> <задача3> [(JUNIOR|SENIOR)_(1|2|3)]", "Создать блок задач"]

@@ -407,7 +407,7 @@ class Participant(OlympMember):
         return super().from_id(id, "participants", error_user_not_found="Участник не найден")
 
 
-    def display_data(self, contact_note: bool = False):
+    def display_data(self, contact_note: bool = True):
         response = f"{self.name} {self.surname}, {self.grade} класс"
         if contact_note: response += f"\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLE}"
         return response
