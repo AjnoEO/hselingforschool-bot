@@ -54,7 +54,12 @@ class User:
                 "INSERT INTO users(tg_id, tg_handle, name, surname) VALUES (?, ?, ?, ?)", 
                 (tg_id, tg_handle, name, surname)
             )
-            cursor.connection.commit()
+        else:
+            cursor.execute(
+                "UPDATE users SET tg_id = ?, name = ?, surname = ? WHERE tg_handle = ?",
+                (tg_id, name, surname, tg_handle)
+            )
+        cursor.connection.commit()
         return cls.from_tg_handle(tg_handle)
 
     @classmethod

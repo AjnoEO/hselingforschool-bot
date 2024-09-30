@@ -283,10 +283,25 @@ def participant_stats(message: Message):
 
 @bot.message_handler(
     commands=["my_info"],
+    roles=['participant'],
+    olymp_statuses=[OlympStatus.REGISTRATION, OlympStatus.CONTEST, OlympStatus.QUEUE, OlympStatus.RESULTS]
+)
+def participant_info(message: Message):
+    participant: Participant = Participant.from_tg_id(message.from_user.id, current_olymp.id)
+    response = (f"Информация о тебе:\n"
+                f"{participant.display_data(contact_note=False)}")
+    if current_olymp.status != OlympStatus.REGISTRATION:
+        response += "\nПросмотреть информацию о сданных задачах можно при помощи команды /my_stats"
+    response += f"\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLE}"
+    bot.send_message(message.chat.id, response)
+
+
+@bot.message_handler(
+    commands=["my_info"],
     roles=['examiner'],
     olymp_statuses=[OlympStatus.REGISTRATION, OlympStatus.CONTEST, OlympStatus.QUEUE, OlympStatus.RESULTS]
 )
-def examiner_stats(message: Message):
+def examiner_info(message: Message):
     examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
     response = (f"Информация о тебе:\n"
                 f"{examiner.display_data(contact_note=False)}\n")
@@ -303,6 +318,7 @@ def examiner_stats(message: Message):
             f"<strong>Статус:</strong> {'занят(-а)' if examiner.is_busy else 'свободен(-на)'}\n"
             f"<strong>Обсуждений с участниками:</strong> {examiner.busyness_level}"
         )
+    response += f"\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLE}"
     bot.send_message(message.chat.id, response)
 
 
@@ -420,32 +436,49 @@ def olymp_create(message: Message):
 
 
 def upload_members(message: Message, required_columns: list[str], member_class: type[OlympMember],
-                   term_stem: str, term_endings: tuple[str]):
+                   term_stem: str, term_endings: tuple[str], term_endings_gen: tuple[str]):
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
     if current_olymp.status != OlympStatus.TBA:
         raise UserError("Регистрация на олимпиаду или олимпиада уже начата")
     file_data = get_file(message, bot, "Необходимо указать Excel-таблицу")
     member_table = pd.read_excel(BytesIO(file_data))
-    if set(member_table.columns) != set(required_columns):
-        bot.send_message(message.chat.id, "Таблица должна содержать столбцы " + ', '.join([f'`{col}`' for col in required_columns]))
-        return
-    for i, m in member_table.iterrows():
-        member_class.create_as_new_user(**m, olymp_id=current_olymp.id, ok_if_user_exists=True)
+    if not set(member_table.columns).issubset(set(required_columns)):
+        raise UserError("Таблица должна содержать столбцы " + ', '.join([f'`{col}`' for col in required_columns]))
+    updated_users: list[tuple[User, member_class]] = []
+    for _, m in member_table.iterrows():
+        old_user = None
+        if user := User.from_tg_handle(m["tg_handle"], no_error=True):
+            if user.name != m["name"] or user.surname != m["surname"]:
+                old_user = user
+        member: member_class = member_class.create_as_new_user(**m, olymp_id=current_olymp.id, ok_if_user_exists=True)
+        if old_user:
+            updated_users.append((old_user, member))
     amount = member_table.shape[0]
     response = (f"{amount} {decline(amount, term_stem, term_endings)} успешно "
                 f"{decline(amount, 'добавлен', ('', 'ы', 'ы'))} в олимпиаду <em>{current_olymp.name}</em>")
+    updated_amount = len(updated_users)
+    if updated_amount > 0:
+        response += f"\nУ {updated_amount} {decline(updated_amount, term_stem, term_endings_gen)} обновилась информация:"
+        for old_user, member in updated_users:
+            response += f"\n- {old_user.name} {old_user.surname} → {member.name} {member.surname} (@{member.tg_handle})"
     bot.send_message(message.chat.id, response)
 
 
 @bot.message_handler(commands=['upload_participants'], roles=['owner'], content_types=['text', 'document'])
 def upload_participants(message: Message):
-    upload_members(message, ["name", "surname", "tg_handle", "grade"], Participant, 'участник', ('', 'а', 'ов'))
+    upload_members(
+        message, ["name", "surname", "tg_handle", "grade"], 
+        Participant, 'участник', ('', 'а', 'ов'), ('а', 'ов', 'ов')
+    )
 
 
 @bot.message_handler(commands=['upload_examiners'], roles=['owner'], content_types=['text', 'document'])
 def upload_examiners(message: Message):
-    upload_members(message, ["name", "surname", "tg_handle", "conference_link"], Examiner, 'принимающ', ('ий', 'их', 'их'))
+    upload_members(
+        message, ["name", "surname", "tg_handle", "conference_link"],
+        Examiner, 'принимающ', ('ий', 'их', 'их'), ('его', 'их', 'их')
+    )
 
 
 @bot.message_handler(commands=['add_participant'], roles=['owner'])
@@ -464,6 +497,39 @@ def add_participant(message: Message):
     bot.send_message(message.chat.id, f"{participant.name} {participant.surname} добавлен(-а) в список участников")
 
 
+@bot.message_handler(commands=['edit_participant'], roles=['owner'])
+def edit_participant(message: Message):
+    if not current_olymp:
+        raise UserError("Нет текущей олимпиады")
+    syntax_hint = ("Синтаксис команды: <code>"
+                   + escape_html("/edit_participant <tg-хэндл> <tg_handle|name|surname|grade> <значение>")
+                   + "</code>")
+    tg_handle, key, value = get_n_args(message, 3, 3, syntax_hint)
+    if key not in ['tg_handle', 'name', 'surname', 'grade']:
+        raise UserError(syntax_hint)
+    if key == 'grade': value = int(value)
+    participant: Participant = Participant.from_tg_handle(tg_handle, current_olymp.id)
+    match key:
+        case 'tg_handle':
+            change = f"Телеграм-хэндл: @{participant.tg_handle} → {value}"
+            participant.tg_handle = value
+        case 'name':
+            change = f"Имя: {participant.name} → {value}"
+            participant.name = value
+        case 'surname':
+            change = f"Фамилия: {participant.surname} → {value}"
+            participant.surname = value
+        case 'grade':
+            change = f"Класс участия: {participant.grade} → {value}"
+            participant.grade = value
+    bot.send_message(message.chat.id, f"Данные участника {participant.name} {participant.surname} обновлены:\n" + change)
+    if participant.tg_id:
+        bot.send_message(
+            participant.tg_id,
+            f"Твои данные обновлены:\n" + change + "\nПросмотреть информацию о себе можно при помощи команды /my_info"
+        )
+
+
 @bot.message_handler(commands=['add_examiner'], roles=['owner'])
 def add_examiner(message: Message):
     if not current_olymp:
@@ -477,6 +543,38 @@ def add_examiner(message: Message):
         problems = problems, ok_if_user_exists = True
     )
     bot.send_message(message.chat.id, f"{examiner.name} {examiner.surname} добавлен(-а) в список принимающих")
+
+
+@bot.message_handler(commands=['edit_participant'], roles=['owner'])
+def edit_participant(message: Message):
+    if not current_olymp:
+        raise UserError("Нет текущей олимпиады")
+    syntax_hint = ("Синтаксис команды: <code>"
+                   + escape_html("/edit_examiner <tg-хэндл> <tg_handle|name|surname|conference_link> <значение>")
+                   + "</code>")
+    tg_handle, key, value = get_n_args(message, 3, 3, syntax_hint)
+    if key not in ['tg_handle', 'name', 'surname', 'conference_link']:
+        raise UserError(syntax_hint)
+    examiner: Examiner = Examiner.from_tg_handle(tg_handle, current_olymp.id)
+    match key:
+        case 'tg_handle':
+            change = f"Телеграм-хэндл: @{examiner.tg_handle} → {value}"
+            examiner.tg_handle = value
+        case 'name':
+            change = f"Имя: {examiner.name} → {value}"
+            examiner.name = value
+        case 'surname':
+            change = f"Фамилия: {examiner.surname} → {value}"
+            examiner.surname = value
+        case 'conference_link':
+            change = f"Ссылка на конференцию: {examiner.conference_link} → {value}"
+            examiner.conference_link = value
+    bot.send_message(message.chat.id, f"Данные принимающего {examiner.name} {examiner.surname} обновлены:\n" + change)
+    if examiner.tg_id:
+        bot.send_message(
+            examiner.tg_id, 
+            f"Твои данные обновлены:\n" + change + "\nПросмотреть информацию о себе можно при помощи команды /my_info"
+        )
 
 
 @bot.message_handler(commands=['set_examiner_problems'], roles=['owner'])

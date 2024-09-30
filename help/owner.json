@@ -5,11 +5,11 @@
             ["olymp_create <название>", "Создать олимпиаду"],
             [
                 "upload_participants", 
-                "Загрузить таблицу с участниками. Столбцы: <block>name</block>, <block>surname</block>, <block>grade</block>, <block>tg_handle</block>"
+                "Загрузить таблицу с участниками. Столбцы: <code>name</code>, <code>surname</code>, <code>grade</code>, <code>tg_handle</code>"
             ],
             [
                 "upload_examiners", 
-                "Загрузить таблицу с принимающими. Столбцы: <block>name</block>, <block>surname</block>, <block>conference_link</block>, <block>tg_handle</block>"
+                "Загрузить таблицу с принимающими. Столбцы: <code>name</code>, <code>surname</code>, <code>conference_link</code>, <code>tg_handle</code>"
             ],
             ["problem_create <название>", "Создать задачу"],
             ["problem_rename <ID> <новое название>", "Переименовать задачу"],
@@ -28,7 +28,9 @@
         ],
         [
             ["add_participant <tg-хэндл> <имя> <фамилия> <класс> [последний блок]", "Добавить участника вручную"],
+            ["edit_participant <tg-хэндл> <tg_handle|name|surname|grade> <значение>", "Изменить информацию об участнике"],
             ["add_examiner <tg-хэндл> <имя> <фамилия> <ссылка на конференцию> <0|задача1 [задача2] […]>", "Добавить принимающего вручную"],
+            ["edit_examiner <tg-хэндл> <tg_handle|name|surname|conference_link> <значение>", "Изменить информацию о принимающем"],
             ["set_examiner_problems <tg-хэндл> <0|задача1 [задача2] […]>", "Изменить список задач принимающего"],
             ["withdraw_examiner <tg-хэндл>", "Снять принимающего с назначенной записи в очередь и подобрать участнику нового принимающего"],
             [
