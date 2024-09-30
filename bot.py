@@ -501,7 +501,7 @@ def olymp_info(message: Message):
     else:
         p_amount = current_olymp.participants_amount()
         e_amount = current_olymp.examiners_amount()
-        pr_amount = current_olymp.participants_amount() # TODO: Почему-то говорит неправду
+        pr_amount = current_olymp.problems_amount()
         response = (f"Олимпиада <em>{current_olymp.name}</em>:\n"
                     f"<strong>ID:</strong> <code>{current_olymp.id}</code>\n"
                     f"<strong>Статус:</strong> <code>{current_olymp.status.name}</code>\n"
