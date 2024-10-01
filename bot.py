@@ -31,6 +31,7 @@ class MyExceptionHandler(telebot.ExceptionHandler):
     def handle(self, exc: Exception):
         message = None
         reply_markup = None
+        contact_note = (message.chat.id != OWNER_ID)
         tb = exc.__traceback__
         while (tb := tb.tb_next):
             # print(tb.tb_frame)
@@ -45,6 +46,7 @@ class MyExceptionHandler(telebot.ExceptionHandler):
             error_message = "⚠️ Ошибка!\n" + str(exc)
             handled = True
             reply_markup = exc.reply_markup
+            contact_note = contact_note and exc.contact_note
         else:
             traceback = exc.__traceback__
             while traceback.tb_next: traceback = traceback.tb_next
@@ -53,7 +55,8 @@ class MyExceptionHandler(telebot.ExceptionHandler):
             error_message = (f"⚠️ Во время выполнения операции произошла ошибка:\n"
                              f"<code>{exc.__class__.__name__} "
                              f"({filename}, строка {line_number}): {exc}</code>")
-        error_message += f"\nЕсли тебе кажется, что это баг, сообщи {OWNER_HANDLE}"
+        if contact_note:
+            error_message += f"\nЕсли тебе кажется, что это баг, сообщи {OWNER_HANDLE}"
         bot.send_message(message.chat.id, error_message, reply_markup=reply_markup)
         return handled
 
@@ -209,7 +212,8 @@ def send_authentication_confirmation(member: OlympMember, *, already_authenticat
             response += "\nЧтобы выбрать задачи для приёма, используй команду /choose_problems"
         elif member.is_busy:
             response += "\n⚠️ Чтобы начать принимать задачи, используй команду /free"
-        response += "\nЧтобы просмотреть информацию о себе, используй команду /my_info"
+        response += ("\nЧтобы просмотреть информацию о себе, используй команду /my_info"
+                     "\nПолный список команд: /help")
     elif current_olymp.status == OlympStatus.REGISTRATION:
         response += ("\n\nДата и время начала олимпиады есть в <a href=\"vk.com/hseling.for.school\">нашей группе ВКонтакте</a> "
                      "и в <a href=\"t.me/hselingforschool\">нашем Телеграм-канале</a>\n"
@@ -359,7 +363,7 @@ def olymp_start(message: Message):
     examiners = current_olymp.get_examiners()
     for e in examiners:
         if e.tg_id:
-            bot.send_message(e.tg_id, "Олимпиада началась! Напиши /free и ожидай участников")
+            bot.send_message(e.tg_id, "Олимпиада началась! Напиши /free и ожидай участников\nСписок команд: /help")
     bot.send_message(message.chat.id, f"Олимпиада <em>{current_olymp.name}</em> начата")
 
 
@@ -1189,6 +1193,9 @@ def announce_queue_entry(queue_entry: QueueEntry):
                          f"участник {participant.name} {participant.surname} ({participant.grade} класс). "
                          f"Ты можешь принять или отклонить решение, а также отменить сдачу (например, если участник "
                          f"не пришёл или если ты не хочешь учитывать эту сдачу как потраченную попытку)")
+    if current_olymp.status == OlympStatus.QUEUE:
+        examiner_response += (f"\n\nЕсли участник случайно нажал не на ту задачу, пожалуйста, напиши {OWNER_HANDLE}! "
+                              "И <strong>не нажимай ни на какую из кнопок!</strong>")
     examiner_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
     examiner_keyboard.add("Принято", "Не принято", "Отмена")
     bot.send_message(examiner.tg_id, examiner_response, reply_markup=examiner_keyboard)
@@ -1219,18 +1226,6 @@ def withdraw_examiner(message: Message):
         if PROMOTE_COMMANDS:
             participant_response += f"Чтобы покинуть очередь, используй команду /leave_queue"
         bot.send_message(participant.tg_id, participant_response, reply_markup=participant_keyboard_in_queue)
-
-
-@bot.message_handler(discussing_examiner=True)
-def examiner_buttons_callback(message: Message):
-    result_status = QueueStatus.from_text(message.text, no_error = True)
-    if not result_status or result_status in QueueStatus.active():
-        bot.send_message(message.chat.id, "Выбери результат сдачи на клавиатуре")
-        return
-    examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
-    queue_entry: QueueEntry = examiner.queue_entry
-    queue_entry.status = result_status
-    announce_queue_entry(queue_entry)
 
 
 @bot.callback_query_handler(
@@ -1516,16 +1511,30 @@ def announce_command(message: Message):
     bot.send_message(message.chat.id, owner_response, reply_to_message_id=announcement.id)
 
 
+@bot.message_handler(discussing_examiner=True)
+def examiner_buttons_callback(message: Message):
+    result_status = QueueStatus.from_text(message.text, no_error = True)
+    if not result_status or result_status in QueueStatus.active():
+        bot.send_message(message.chat.id, "Выбери результат сдачи на клавиатуре")
+        return
+    examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
+    queue_entry: QueueEntry = examiner.queue_entry
+    queue_entry.status = result_status
+    announce_queue_entry(queue_entry)
+
+
 @bot.message_handler(regexp=r"/.+")
 def other_commands(message: Message):
     raise UserError("Неизвестная команда")
 
 @bot.message_handler(roles=['not owner'])
 def other_messages(message: Message):
-    raise UserError("Неизвестная команда\n"
-                    "Если у тебя есть организационные вопросы касательно олимпиады, "
-                    "пиши нам в <a href=\"vk.com/hseling.for.school\">группе ВКонтакте</a> "
-                    "и в <a href=\"t.me/hselingforschool\">Телеграм-канале</a>")
+    raise UserError(f"Неизвестная команда\n"
+                    f"Если у тебя есть организационные вопросы касательно олимпиады, "
+                    f"пиши нам в <a href=\"vk.com/hseling.for.school\">группе ВКонтакте</a> "
+                    f"и в <a href=\"t.me/hselingforschool\">Телеграм-канале</a>\n"
+                    f"Если у тебя есть вопросы по работе бота, пиши {OWNER_ID}",
+                    contact_note=False)
 
 
 print("Запускаю бота...")
