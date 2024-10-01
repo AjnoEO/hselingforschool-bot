@@ -12,7 +12,7 @@ class UserError(Exception):
         super().__init__(*args)
         self.reply_markup = reply_markup
 
-def decline(numeral: int, stem: str, endings: tuple[str]):
+def decline(numeral: int, stem: str, endings: tuple[str, str, str]):
     numeral = abs(numeral)
     if (numeral // 10) % 10 == 1:
         return stem + endings[2]

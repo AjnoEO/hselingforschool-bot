@@ -290,6 +290,26 @@ class OlympMember(User):
             user_id, olymp_id = fetch
             return cls.from_user_id(user_id, olymp_id)
 
+    @classmethod
+    def create_for_existing_user(
+        cls,
+        *args,
+        **kwargs
+    ):
+        if cls == OlympMember:
+            raise TypeError("Метод `create_for_existing_user` предназначен для использования с классами `Participant` и `Examiner`")
+        cls.create_for_existing_user(*args, **kwargs)
+
+    @classmethod
+    def create_as_new_user(
+        cls,
+        *args,
+        **kwargs
+    ):
+        if cls == OlympMember:
+            raise TypeError("Метод `create_as_new_user` предназначен для использования с классами `Participant` и `Examiner`")
+        cls.create_as_new_user(*args, **kwargs)
+
     def _queue_entry(self, id_column: str):
         with sqlite3.connect(DATABASE) as conn:
             cur = conn.cursor()
@@ -348,10 +368,10 @@ class Participant(OlympMember):
         if exists and not ok_if_exists:
             raise UserError(f"Пользователь {user_id} уже участник олимпиады {olymp_id}")
         if exists:
-            q = (f"UPDATE participants SET olymp_id = ?, grade = ?"
+            q = (f"UPDATE participants SET grade = ?"
                  f"{', last_block_number = ?' if last_block_number else ''} "
-                 f"WHERE user_id = ?")
-            p = [olymp_id, grade] + ([last_block_number] if last_block_number else []) + [user_id]
+                 f"WHERE olymp_id = ?, user_id = ?")
+            p = [grade] + ([last_block_number] if last_block_number else []) + [olymp_id, user_id]
         else:
             q = (f"INSERT INTO participants(user_id, olymp_id, grade"
                 f"{', last_block_number' if last_block_number else ''}) VALUES "
@@ -601,8 +621,8 @@ class Examiner(OlympMember):
             raise UserError(f"Пользователь {user_id} уже проверяющий в олимпиаде {olymp_id}")
         if exists:
             cursor.execute(
-                "UPDATE examiners SET olymp_id = ?, conference_link = ?, busyness_level = ?, is_busy = ? WHERE user_id = ?",
-                (olymp_id, conference_link, busyness_level, int(is_busy), user_id)
+                "UPDATE examiners SET conference_link = ?, busyness_level = ?, is_busy = ? WHERE olymp_id = ?, user_id = ?",
+                (conference_link, busyness_level, int(is_busy), olymp_id, user_id)
             )
         else:
             cursor.execute(

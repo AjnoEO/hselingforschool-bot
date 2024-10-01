@@ -108,8 +108,19 @@ class Olymp:
         return len(cursor.fetchall())
 
     @provide_cursor
-    def get_participants(self, *, cursor: sqlite3.Cursor | None = None) -> list[Participant]:
-        cursor.execute("SELECT user_id FROM participants WHERE olymp_id = ?", (self.id,))
+    def get_participants(
+        self, start: int | None = None, limit: int | None = None, *, sort: bool = False, cursor: sqlite3.Cursor | None = None
+    ) -> list[Participant]:
+        if not limit and start:
+            raise ValueError("Нельзя устанавливать начало списка участников, не устанавливая ограничение на количество")
+        q = "SELECT user_id FROM participants WHERE olymp_id = ?"
+        if sort:
+            q += " ORDER BY id ASC"
+        if limit:
+            q += f" LIMIT {limit}"
+            if start:
+                q += f" OFFSET {start}"
+        cursor.execute(q, (self.id,))
         results = cursor.fetchall()
         return [Participant.from_user_id(user_id_tuple[0], self.id) for user_id_tuple in results]
     
@@ -117,12 +128,23 @@ class Olymp:
         return self.__amount("participants")
     
     @provide_cursor
-    def get_examiners(self, *, only_free: bool = False, order_by_busyness: bool = False, cursor: sqlite3.Cursor | None = None) -> list[Participant]:
+    def get_examiners(
+        self, start: int | None = None, limit: int | None = None, *,
+        sort: bool = False, only_free: bool = False, order_by_busyness: bool = False, cursor: sqlite3.Cursor | None = None
+    ) -> list[Examiner]:
+        if not limit and start:
+            raise ValueError("Нельзя устанавливать начало списка принимающих, не устанавливая ограничение на количество")
         q = "SELECT user_id FROM examiners WHERE olymp_id = ?"
         if only_free:
             q += " AND is_busy = 0"
         if order_by_busyness:
             q += " ORDER BY busyness_level ASC"
+        elif sort:
+            q += " ORDER BY id ASC"
+        if limit:
+            q += f" LIMIT {limit}"
+            if start:
+                q += f" OFFSET {start}"
         cursor.execute(q, (self.id,))
         results = cursor.fetchall()
         return [Examiner.from_user_id(user_id_tuple[0], self.id) for user_id_tuple in results]

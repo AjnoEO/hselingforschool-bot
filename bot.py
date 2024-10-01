@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import re
+from typing import Callable, Any
 import json
 from db import create_update_db
 from data import TOKEN, OWNER_ID, OWNER_HANDLE
@@ -20,6 +21,7 @@ from io import BytesIO
 
 PROMOTE_COMMANDS = False # Подсказывать ли команды участникам
 NO_EXAMINER_COMPLAINTS = False # Давать ли участникам возможность пожаловаться на то, что принимающий не пришёл
+MEMBER_PAGE_SIZE = 10 # Сколько членов олимпиады показывать в одном сообщении списка
 
 
 create_update_db()
@@ -436,13 +438,13 @@ def olymp_create(message: Message):
     bot.send_message(message.chat.id, f"Олимпиада <em>{current_olymp.name}</em> успешно создана")
 
 
-def upload_members(message: Message, required_key: str, key_name: str, member_class: type[OlympMember],
-                   term_stem: str, term_endings: tuple[str], term_endings_gen: tuple[str]):
-    required_columns = ["name", "surname", "tg_handle", required_key]
+def upload_members(message: Message, required_key: str, key_description: str, member_class: type[OlympMember],
+                   term_stem: str, term_endings: tuple[str, str, str], term_endings_gen: tuple[str, str, str]):
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
     if current_olymp.status != OlympStatus.TBA:
         raise UserError("Регистрация на олимпиаду или олимпиада уже начата")
+    required_columns = ["name", "surname", "tg_handle", required_key]
     file_data = get_file(message, bot, "Необходимо указать Excel-таблицу")
     member_table = pd.read_excel(BytesIO(file_data))
     if not set(member_table.columns).issubset(set(required_columns)):
@@ -474,123 +476,133 @@ def upload_members(message: Message, required_key: str, key_name: str, member_cl
         response += f"\nУ {updated_amount} {decline(updated_amount, term_stem, term_endings_gen)} обновилась информация:"
         for old_user, member in updated_users:
             if isinstance(old_user, member_class):
-                response += (f"\n- {old_user.name} {old_user.surname}, {key_name}: {old_user._additional_values[required_key]} "
-                             f"→ {member.name} {member.surname}, {key_name}: {member._additional_values[required_key]} "
+                response += (f"\n- {old_user.name} {old_user.surname}, "
+                             f"{key_description.format(old_user._additional_values[required_key])} "
+                             f"→ {member.name} {member.surname}, "
+                             f"{key_description.format(member._additional_values[required_key])} "
                              f"(@{member.tg_handle})")
             else:
                 response += f"\n- {old_user.name} {old_user.surname} → {member.name} {member.surname} (@{member.tg_handle})"
+    response += (f"\nЧтобы просмотреть список {term_stem}{term_endings_gen[2]}, "
+                 f"используй команду /list_{member_class.__name__.lower()}s")
     bot.send_message(message.chat.id, response)
 
 
-@bot.message_handler(commands=['upload_participants'], roles=['owner'], content_types=['text', 'document'])
-def upload_participants(message: Message):
-    upload_members(
-        message, "grade", "Класс",
-        Participant, 'участник', ('', 'а', 'ов'), ('а', 'ов', 'ов')
+@bot.message_handler(commands=['upload_participants', 'upload_examiners'], roles=['owner'], content_types=['text', 'document'])
+def upload_members_command(message: Message):
+    command = extract_command(message.text)
+    if command == 'upload_participants':
+        upload_members(
+            message, "grade", "{0} класс",
+            Participant, 'участник', ('', 'а', 'ов'), ('а', 'ов', 'ов')
+        )
+    else:
+        upload_members(
+            message, "conference_link", "Ссылка на конференцию: {0}",
+            Examiner, 'принимающ', ('ий', 'их', 'их'), ('его', 'их', 'их')
+        )
+
+
+def add_member(message: Message, min_args: int, max_args: int, no_arg_error: str,
+               additional_values_func: Callable[[list[str]], dict[str]],
+               member_class: type[OlympMember], term_pl_gen: str):
+    if not current_olymp:
+        raise UserError("Нет текущей олимпиады")
+    tg_handle, name, surname, *other_args = get_n_args(
+        message, min_args, max_args, no_arg_error
     )
-
-
-@bot.message_handler(commands=['upload_examiners'], roles=['owner'], content_types=['text', 'document'])
-def upload_examiners(message: Message):
-    upload_members(
-        message, "conference_link", "Ссылка на конференцию",
-        Examiner, 'принимающ', ('ий', 'их', 'их'), ('его', 'их', 'их')
+    other_args = additional_values_func(other_args)
+    member: member_class = member_class.create_as_new_user(
+        tg_handle, name, surname, olymp_id=current_olymp.id,
+        **other_args, ok_if_user_exists=True
     )
+    bot.send_message(message.chat.id, f"{member.name} {member.surname} добавлен(-а) в список {term_pl_gen}")
 
 
-@bot.message_handler(commands=['add_participant'], roles=['owner'])
+@bot.message_handler(commands=['add_participant', 'add_examiner'], roles=['owner'])
 def add_participant(message: Message):
-    if not current_olymp:
-        raise UserError("Нет текущей олимпиады")
-    tg_handle, name, surname, *numbers = get_n_args(
-        message, 4, 5, "Необходимо указать Телеграм-хэндл, имя, фамилию, класс и, при необходимости, последний блок участника"
-    )
-    grade = int(numbers[0])
-    last_block_number = int(numbers[1]) if len(numbers) > 1 else None
-    participant: Participant = Participant.create_as_new_user(
-        tg_handle, name, surname, grade, current_olymp.id,
-        last_block_number=last_block_number, ok_if_user_exists=True
-    )
-    bot.send_message(message.chat.id, f"{participant.name} {participant.surname} добавлен(-а) в список участников")
+    command = extract_command(message.text)
+    if command == 'add_participant':
+        add_member(
+            message, 4, 5, "Необходимо указать Телеграм-хэндл, имя, фамилию, класс и, при необходимости, последний блок участника",
+            lambda args: {'grade': int(args[0]), 'last_block_number': int(args[1]) if len(args) > 1 else None},
+            Participant, "участников"
+        )
+    else:
+        add_member(
+            message, 5, 5, "Необходимо указать Телеграм-хэндл, имя, фамилию, ссылку на конференцию и задачи принимающего",
+            lambda args: {'conference_link': args[0], 'problems': list(map(int, args[1].split())) if args[1][0] != '0' else None},
+            Examiner, "принимающих"
+        )
 
 
-@bot.message_handler(commands=['edit_participant'], roles=['owner'])
-def edit_participant(message: Message):
+def edit_member(
+    message: Message, member_class: type[OlympMember],
+    other_args: dict[str, tuple[str, Callable[[OlympMember], str], Callable[[OlympMember, str], None]]]
+):
+    """
+    Изменить данные члена олимпиады
+
+    :param message: Сообщение (команда)
+    :type message: `Message`
+
+    :param syntax: Команда (напр. `edit_participant`)
+    :type syntax: `str`
+
+    :param member_class: Класс типа члена олимпиады
+    :type member_class: Подкласс `OlympMember`
+
+    :param other_args: Возможные аргументы кроме `tg_handle`, `name` и `surname`.
+    Словарь, где ключ — ключ аргумента, а значение — кортеж русского названия и двух функций, `getter(member)` и `setter(member, value)`
+    :type other_args: {`str`: (`str`, `getter(member) -> str`, `setter(member, value)`)}
+    """
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
+    possible_keys = ['tg_handle', 'name', 'surname'] + list(other_args.keys())
+    def tg_setter(member: member_class, value: str): member.tg_handle = value
+    other_args['tg_handle'] = (
+        'Телеграм-хэндл', 
+        lambda member: "Без хэндла" if member.tg_handle.isnumeric() else f"@{member.tg_handle}",
+        tg_setter
+    )
+    def name_setter(member: member_class, value: str): member.name = value
+    other_args['name'] = ('Имя', lambda member: member.name, name_setter)
+    def surname_setter(member: member_class, value: str): member.surname = value
+    other_args['surname'] = ('Фамилия', lambda member: member.surname, surname_setter)
+    command = extract_command(message.text)
     syntax_hint = ("Синтаксис команды: <code>"
-                   + escape_html("/edit_participant <tg-хэндл> <tg_handle|name|surname|grade> <значение>")
+                   + escape_html("/" + command + " <tg-хэндл> <" + "|".join(possible_keys) + "> <значение>")
                    + "</code>")
     tg_handle, key, value = get_n_args(message, 3, 3, syntax_hint)
-    if key not in ['tg_handle', 'name', 'surname', 'grade']:
+    if key not in possible_keys:
         raise UserError(syntax_hint)
     if key == 'grade': value = int(value)
-    participant: Participant = Participant.from_tg_handle(tg_handle, current_olymp.id)
-    match key:
-        case 'tg_handle':
-            change = f"Телеграм-хэндл: @{participant.tg_handle} → {value}"
-            participant.tg_handle = value
-        case 'name':
-            change = f"Имя: {participant.name} → {value}"
-            participant.name = value
-        case 'surname':
-            change = f"Фамилия: {participant.surname} → {value}"
-            participant.surname = value
-        case 'grade':
-            change = f"Класс участия: {participant.grade} → {value}"
-            participant.grade = value
-    bot.send_message(message.chat.id, f"Данные участника {participant.name} {participant.surname} обновлены:\n" + change)
-    if participant.tg_id:
+    member: member_class = member_class.from_tg_handle(tg_handle, current_olymp.id)
+    old_value = other_args[key][1](member)
+    other_args[key][2](member, value)
+    change = f"{other_args[key][0]}: {old_value} → {value}"
+    bot.send_message(message.chat.id, f"Данные участника {member.name} {member.surname} обновлены:\n" + change)
+    if member.tg_id:
         bot.send_message(
-            participant.tg_id,
+            member.tg_id,
             f"Твои данные обновлены:\n" + change + "\nПросмотреть информацию о себе можно при помощи команды /my_info"
         )
 
 
-@bot.message_handler(commands=['add_examiner'], roles=['owner'])
-def add_examiner(message: Message):
-    if not current_olymp:
-        raise UserError("Нет текущей олимпиады")
-    tg_handle, name, surname, conference_link, problems = get_n_args(
-        message, 5, 5, "Необходимо указать Телеграм-хэндл, имя, фамилию, ссылку на конференцию и задачи принимающего"
-    )
-    problems = list(map(int, problems.split())) if problems[0] != '0' else None
-    examiner: Examiner = Examiner.create_as_new_user(
-        tg_handle, name, surname, conference_link, current_olymp.id,
-        problems = problems, ok_if_user_exists = True
-    )
-    bot.send_message(message.chat.id, f"{examiner.name} {examiner.surname} добавлен(-а) в список принимающих")
-
-
-@bot.message_handler(commands=['edit_examiner'], roles=['owner'])
-def edit_examiner(message: Message):
-    if not current_olymp:
-        raise UserError("Нет текущей олимпиады")
-    syntax_hint = ("Синтаксис команды: <code>"
-                   + escape_html("/edit_examiner <tg-хэндл> <tg_handle|name|surname|conference_link> <значение>")
-                   + "</code>")
-    tg_handle, key, value = get_n_args(message, 3, 3, syntax_hint)
-    if key not in ['tg_handle', 'name', 'surname', 'conference_link']:
-        raise UserError(syntax_hint)
-    examiner: Examiner = Examiner.from_tg_handle(tg_handle, current_olymp.id)
-    match key:
-        case 'tg_handle':
-            change = f"Телеграм-хэндл: @{examiner.tg_handle} → {value}"
-            examiner.tg_handle = value
-        case 'name':
-            change = f"Имя: {examiner.name} → {value}"
-            examiner.name = value
-        case 'surname':
-            change = f"Фамилия: {examiner.surname} → {value}"
-            examiner.surname = value
-        case 'conference_link':
-            change = f"Ссылка на конференцию: {examiner.conference_link} → {value}"
-            examiner.conference_link = value
-    bot.send_message(message.chat.id, f"Данные принимающего {examiner.name} {examiner.surname} обновлены:\n" + change)
-    if examiner.tg_id:
-        bot.send_message(
-            examiner.tg_id, 
-            f"Твои данные обновлены:\n" + change + "\nПросмотреть информацию о себе можно при помощи команды /my_info"
+@bot.message_handler(commands=['edit_participant', 'edit_examiner'], roles=['owner'])
+def edit_member_command(message: Message):
+    command = extract_command(message.text)
+    if command == 'edit_participant':
+        def grade_setter(participant: Participant, value: str): participant.grade = int(value)
+        edit_member(
+            message, "edit_participant", Participant,
+            {'grade': ('Класс участия', lambda participant: participant.grade, grade_setter)}
+        )
+    else:
+        def conference_link_setter(examiner: Examiner, value: str): examiner.conference_link = value
+        edit_member(
+            message, "edit_examiner", Examiner,
+            {'conference_link': ('Ссылка на конференцию', lambda examiner: examiner.conference_link, conference_link_setter)}
         )
 
 
@@ -607,6 +619,101 @@ def set_examiner_problems(message: Message):
         examiner_response += f"- <em>{escape_html(Problem.from_id(problem_id).name)}</em>\n"
     bot.send_message(examiner.tg_id, examiner_response)
     bot.send_message(message.chat.id, f"Список задач принимающего {examiner.name} {examiner.surname} обновлён")
+
+
+def list_members_page(message: Message, member_class: type[OlympMember], page: int, member_amount: int, title: str,
+                      get_func: Callable[[int, int], list[OlympMember]]):
+    """
+    Отредактировать сообщение `message`, чтобы отобразить страницу `page` списка членов олимпиады
+
+    :param message: Сообщение (от бота)
+    :type message: `Message`
+
+    :param member_class: Класс типа члена олимпиады
+    :type member_class: Подкласс `OlympMember`
+
+    :param page: Номер страницы
+    :type page: `int`
+
+    :param member_amount: Количество членов олимпиады
+    :type member_amount: `int``
+
+    :param title: Заголовок сообщения о списке
+    :type title: `str`
+
+    :param get_func: Функция получения списка из номера первого члена олимпиады и длины списка
+    :type get_func: get_list(start, limit) -> `list[OlympMember]`
+    """
+    if not current_olymp:
+        raise UserError("Нет текущей олимпиады")
+    member_class_name = member_class.__name__.lower()
+    callback_invalid = {'callback_data': f'page_list_{member_class_name}_invalid'}
+    if member_amount == 0:
+        buttons = {'← X': callback_invalid, 'X →': callback_invalid}
+        bot.edit_message_text(title, message.chat.id, message.id, reply_markup=quick_markup(buttons))
+        return
+    max_page = (member_amount-1) // MEMBER_PAGE_SIZE + 1
+    if page > max_page:
+        page = max_page
+    text = title + f"\nСтраница {page}/{max_page}"
+    buttons = {}
+    if page == 1:
+        buttons['← X'] = callback_invalid
+    else:
+        buttons[f'← {page-1}'] = {'callback_data': f'page_list_{member_class_name}_{page-1}'}
+    if page == max_page:
+        buttons['X →'] = callback_invalid
+    else:
+        buttons[f'{page+1} →'] = {'callback_data': f'page_list_{member_class_name}_{page+1}'}
+    member_list = get_func((page-1)*MEMBER_PAGE_SIZE, MEMBER_PAGE_SIZE)
+    for member in member_list:
+        text += (f"\n- {member.name} {member.surname} "
+                 f"({f'ID: <code>{member.tg_handle}</code>' if member.tg_handle.isnumeric() else f'@{member.tg_handle}'})")
+    bot.edit_message_text(text, message.chat.id, message.id, reply_markup=quick_markup(buttons))
+
+
+def list_participants_page(message: Message, page: int):
+    amount = current_olymp.participants_amount()
+    list_members_page(
+        message, Participant, page, amount,
+        f"В олимпиаде {decline(amount, 'участву', ('ет', 'ют', 'ет'))} {amount} {decline(amount, 'человек', ('', 'а', ''))}",
+        lambda start, limit: current_olymp.get_participants(start, limit, sort=True)
+    )
+
+
+def list_examiners_page(message: Message, page: int):
+    amount = current_olymp.examiners_amount()
+    list_members_page(
+        message, Examiner, page, amount, 
+        f"В олимпиаде {amount} {decline(amount, 'принимающ', ('ий', 'их', 'их'))}",
+        lambda start, limit: current_olymp.get_examiners(start, limit, sort=True)
+    )
+
+
+@bot.message_handler(commands=['list_participants', 'list_examiners'], roles=['owner'])
+def list_members_command(message: Message):
+    if not current_olymp:
+        raise UserError("Нет текущей олимпиады")
+    reply = bot.send_message(message.chat.id, "Обработка запроса...", reply_markup=quick_markup({}))
+    command = extract_command(message.text)
+    if command == 'list_participants':
+        list_participants_page(reply, 1)
+    else:
+        list_examiners_page(reply, 1)
+
+
+@bot.callback_query_handler(lambda callback_query: callback_query.data.startswith('page_list_'))
+def list_members_page_handler(callback_query: CallbackQuery):
+    message = callback_query.message
+    member_type, page = callback_query.data[len('page_list_'):].split('_')
+    if page == 'invalid':
+        bot.answer_callback_query(callback_query.id, "Страницы нет")
+        return
+    page = int(page)
+    if member_type == 'participant':
+        list_participants_page(message, page)
+    else:
+        list_examiners_page(message, page)
 
 
 @bot.message_handler(commands=['olymp_info'], roles=['owner'])
