@@ -208,7 +208,7 @@ def send_authentication_confirmation(member: OlympMember, *, already_authenticat
         if not current_olymp.status == OlympStatus.CONTEST:
             response += "\nЧтобы выбрать задачи для приёма, используй команду /choose_problems"
         elif member.is_busy:
-            response += "\nЧтобы начать принимать задачи, используй команду /free"
+            response += "\n⚠️ Чтобы начать принимать задачи, используй команду /free"
         response += "\nЧтобы просмотреть информацию о себе, используй команду /my_info"
     elif current_olymp.status == OlympStatus.REGISTRATION:
         response += ("\n\nДата и время начала олимпиады есть в <a href=\"vk.com/hseling.for.school\">нашей группе ВКонтакте</a> "
@@ -829,10 +829,72 @@ def update_queue_entry_status(message: Message):
         raise UserError(f"Статус уже {status_text.capitalize()}")
     queue_entry.status = status
     if message.reply_to_message:
+        message_to_send = message.reply_to_message
         participant: Participant = Participant.from_id(queue_entry.participant_id)
-        bot.send_message(participant.tg_id, message.reply_to_message.text)
+        bot.copy_message(participant.tg_id, message_to_send.chat.id, message_to_send.id)
     announce_queue_entry(queue_entry)
 
+
+@bot.message_handler(
+    commands=['update_queue_entry_problem'],
+    roles=['owner'],
+    olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE]
+)
+def update_queue_entry_problem(message: Message):
+    id, problem_id = get_n_args(message, 2, 2, "Необходимо указать ID записи и ID новой задачи")
+    if not id.isnumeric() or not problem_id.isnumeric(): raise UserError("Необходимо указать ID записи и ID новой задачи")
+    id, problem_id = int(id), int(problem_id)
+    queue_entry = QueueEntry.from_id(id)
+    problem = Problem.from_id(problem_id)
+    if problem.olymp_id != current_olymp.id:
+        raise UserError(f"Задача <code>{problem_id}</code> не относится к текущей олимпиаде")
+    if queue_entry.problem_id == problem_id:
+        raise UserError(f"Записи <code>{id}</code> уже соответствует задача <code>{problem_id}</code> <em>{problem.name}</em>")
+    if queue_entry.status not in QueueStatus.active():
+        raise UserError(f"Задачу завершённого обсуждения нельзя изменить")
+    participant: Participant = Participant.from_id(queue_entry.participant_id)
+    if not participant.has_problem(problem):
+        raise UserError(
+            f"У участника {participant.name} {participant.surname} нет задачи <code>{problem_id}</code> <em>{problem.name}</em>"
+        )
+    if participant.attempts_left(problem) <= 0 or participant.solved(problem):
+        raise UserError(
+            f"Участник {participant.name} {participant.surname} больше не может "
+            f"сдавать задачу <code>{problem_id}</code> <em>{problem.name}</em>"
+        )
+    queue_entry.problem_id = problem_id
+    if message.reply_to_message:
+        message_to_send = message.reply_to_message
+        participant: Participant = Participant.from_id(queue_entry.participant_id)
+        bot.copy_message(participant.tg_id, message_to_send.chat.id, message_to_send.id)
+    if queue_entry.status == QueueStatus.DISCUSSING:
+        examiner: Examiner = Examiner.from_id(queue_entry.examiner_id)
+        if problem_id in examiner.problems:
+            bot.send_message(
+                examiner.tg_id,
+                f"Участнику {participant.name} {participant.surname} сменили задачу на <em>{problem.name}</em>. Обсуждайте её!"
+            )
+            problem_number = participant.get_problem_number(problem)
+            bot.send_message(
+                participant.tg_id,
+                f"Задачу {problem_number}: <em>{problem.name}</em> у тебя примет тот же принимающий, "
+                f"{examiner.name} {examiner.surname}, по ссылке {examiner.conference_link}"
+            )
+            return
+        queue_entry.status = QueueStatus.WAITING
+        queue_entry.examiner_id = None
+        examiner.is_busy = True
+        bot.send_message(
+            examiner.tg_id,
+            f"Участнику {participant.name} {participant.surname} сменили задачу на задачу, которую ты не принимаешь\n"
+            f"⚠️ Бот установил тебе статус \"занят(-а)\". Пожалуйста, используй команду /free, чтобы продолжить принимать задачи!",
+            reply_markup=ReplyKeyboardRemove()
+        )
+    new_examiner_id = queue_entry.look_for_examiner()
+    if new_examiner_id:
+        new_examiner: Examiner = Examiner.from_id(new_examiner_id)
+        new_examiner.assign_to_queue_entry(queue_entry)
+    announce_queue_entry(queue_entry)
 
 
 @bot.message_handler(commands=['problem_create'], roles=['owner'])
@@ -1098,7 +1160,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
             keyboard = participant_keyboard_olymp_finished
         unhandled_queue_left = current_olymp.unhandled_queue_left()
         if current_olymp.status == OlympStatus.CONTEST or unhandled_queue_left:
-            examiner_response += "\nЧтобы продолжить принимать задачи, используй команду /free"
+            examiner_response += "\n⚠️ Чтобы продолжить принимать задачи, используй команду /free"
         if new_problem_block:
             bot.send_document(
                 participant.tg_id, 
@@ -1120,7 +1182,8 @@ def announce_queue_entry(queue_entry: QueueEntry):
     bot.send_message(
         participant.tg_id, 
         participant_response, 
-        reply_markup=quick_markup({'Принимающий не пришёл': {'callback_data': 'examiner_didnt_come'}}) if NO_EXAMINER_COMPLAINTS else None
+        reply_markup=(quick_markup({'Принимающий не пришёл': {'callback_data': 'examiner_didnt_come'}})
+                      if NO_EXAMINER_COMPLAINTS else ReplyKeyboardRemove())
     )
     examiner_response = (f"К тебе идёт сдавать задачу <em>{escape_html(problem.name)}</em> "
                          f"участник {participant.name} {participant.surname} ({participant.grade} класс). "
@@ -1139,7 +1202,7 @@ def withdraw_examiner(message: Message):
     examiner.withdraw_from_queue_entry()
     examiner_response = (f"{participant.name} {participant.surname} пожаловался(-лась), что тебя не было на приёме задачи. "
                          f"Пожалуйста, используй команду /busy, если тебе надо отойти!\n"
-                         f"Бот установил тебе статус \"занят(-а)\". "
+                         f"⚠️ Бот установил тебе статус \"занят(-а)\". "
                          f"Когда вернёшься, используй команду /free, чтобы продолжить принимать задачи")
     bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
     queue_entry = participant.queue_entry
@@ -1203,7 +1266,7 @@ def examiner_didnt_come_handler(callback_query: CallbackQuery):
     examiner.withdraw_from_queue_entry()
     examiner_response = (f"{participant.name} {participant.surname} отметил(-а), что тебя не было на приёме задачи. "
                          f"Пожалуйста, используй команду /busy, если тебе надо отойти!\n"
-                         f"Бот установил тебе статус \"занят(-а)\". "
+                         f"⚠️ Бот установил тебе статус \"занят(-а)\". "
                          f"Когда вернёшься, используй команду /free, чтобы продолжить принимать задачи")
     bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
     queue_entry = participant.queue_entry
