@@ -53,7 +53,8 @@ CREATE TABLE IF NOT EXISTS `participants` (
 	`grade` INTEGER NOT NULL,
 	`last_block_number` INTEGER NOT NULL DEFAULT 1 CHECK (`last_block_number` BETWEEN 1 AND 3),
 	FOREIGN KEY(`olymp_id`) REFERENCES `olymps`(`id`),
-	FOREIGN KEY(`user_id`) REFERENCES `users`(`user_id`)
+	FOREIGN KEY(`user_id`) REFERENCES `users`(`user_id`),
+	UNIQUE(`olymp_id`, `user_id`)
 );
 CREATE TABLE IF NOT EXISTS `examiners` (
 	`id` integer primary key NOT NULL UNIQUE,
@@ -63,7 +64,8 @@ CREATE TABLE IF NOT EXISTS `examiners` (
 	`busyness_level` INTEGER NOT NULL,
 	`is_busy` INTEGER NOT NULL CHECK (`is_busy` IN (0, 1)),
 	FOREIGN KEY(`olymp_id`) REFERENCES `olymps`(`id`),
-	FOREIGN KEY(`user_id`) REFERENCES `users`(`user_id`)
+	FOREIGN KEY(`user_id`) REFERENCES `users`(`user_id`),
+	UNIQUE(`olymp_id`, `user_id`)
 );
 CREATE TABLE IF NOT EXISTS `examiner_problems` (
 	`examiner_id` integer NOT NULL,
