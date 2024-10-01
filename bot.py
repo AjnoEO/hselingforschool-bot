@@ -307,21 +307,7 @@ def participant_info(message: Message):
 def examiner_info(message: Message):
     examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
     response = (f"Информация о тебе:\n"
-                f"{examiner.display_data(contact_note=False)}\n")
-    problems = [Problem.from_id(problem_id) for problem_id in examiner.problems]
-    if len(problems) == 0:
-        response += f"Задач нет\n"
-    else:
-        response += f"<strong>Задачи:</strong>\n"
-        for problem_id in examiner.problems:
-            problem = Problem.from_id(problem_id)
-            response += f"- <em>{escape_html(problem.name)}</em>\n"
-    if current_olymp.status != OlympStatus.REGISTRATION:
-        response += (
-            f"<strong>Статус:</strong> {'занят(-а)' if examiner.is_busy else 'свободен(-на)'}\n"
-            f"<strong>Обсуждений с участниками:</strong> {examiner.busyness_level}"
-        )
-    response += f"\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLE}"
+                f"{examiner.display_data(verbose=True, olymp_status=current_olymp.status)}")
     bot.send_message(message.chat.id, response)
 
 
@@ -480,9 +466,9 @@ def upload_members(message: Message, required_key: str, key_description: str, me
                              f"{key_description.format(old_user._additional_values[required_key])} "
                              f"→ {member.name} {member.surname}, "
                              f"{key_description.format(member._additional_values[required_key])} "
-                             f"(@{member.tg_handle})")
+                             f"({member.display_tg_handle()})")
             else:
-                response += f"\n- {old_user.name} {old_user.surname} → {member.name} {member.surname} (@{member.tg_handle})"
+                response += f"\n- {old_user.name} {old_user.surname} → {member.name} {member.surname} ({member.display_tg_handle()})"
     response += (f"\nЧтобы просмотреть список {term_stem}{term_endings_gen[2]}, "
                  f"используй команду /list_{member_class.__name__.lower()}s")
     bot.send_message(message.chat.id, response)
@@ -546,9 +532,6 @@ def edit_member(
     :param message: Сообщение (команда)
     :type message: `Message`
 
-    :param syntax: Команда (напр. `edit_participant`)
-    :type syntax: `str`
-
     :param member_class: Класс типа члена олимпиады
     :type member_class: Подкласс `OlympMember`
 
@@ -562,7 +545,7 @@ def edit_member(
     def tg_setter(member: member_class, value: str): member.tg_handle = value
     other_args['tg_handle'] = (
         'Телеграм-хэндл', 
-        lambda member: "Без хэндла" if member.tg_handle.isnumeric() else f"@{member.tg_handle}",
+        lambda member: member.display_tg_handle(hide_id=True),
         tg_setter
     )
     def name_setter(member: member_class, value: str): member.name = value
@@ -612,13 +595,54 @@ def set_examiner_problems(message: Message):
         raise UserError("Нет текущей олимпиады")
     tg_handle, problems = get_n_args(message, 2, 2, "Необходимо указать Телеграм-хэндл принимающего и задачи")
     problems = list(map(int, problems.split())) if problems[0] != '0' else None
+    if problems:
+        current_problems = set(map(lambda problem: problem.id, current_olymp.get_problems()))
+        if not set(problems).issubset(current_problems):
+            raise UserError("Можно назначать только задачи текущей олимпиады")
     examiner: Examiner = Examiner.from_tg_handle(tg_handle, current_olymp.id)
     examiner.set_problems(problems)
     examiner_response = "Твой список задач обновлён:\n"
     for problem_id in problems:
         examiner_response += f"- <em>{escape_html(Problem.from_id(problem_id).name)}</em>\n"
-    bot.send_message(examiner.tg_id, examiner_response)
+    if examiner.tg_id:
+        bot.send_message(examiner.tg_id, examiner_response)
     bot.send_message(message.chat.id, f"Список задач принимающего {examiner.name} {examiner.surname} обновлён")
+
+
+def view_member(
+    message: Message, member_class: type[OlympMember], member_name: str, member_name_gen: str
+):
+    """
+    Просмотреть данные члена олимпиады
+
+    :param message: Сообщение (команда)
+    :type message: `Message`
+
+    :param member_class: Класс типа члена олимпиады
+    :type member_class: Подкласс `OlympMember`
+
+    :param member_name: Русское название члена олимпиады
+    :type member_name: `str`
+
+    :param member_name: Русское название члена олимпиады в родительном падеже
+    :type member_name: `str`
+    """
+    if not current_olymp:
+        raise UserError("Нет текущей олимпиады")
+    tg_handle = get_arg(message, "Необходимо указать Телеграм-хэндл " + member_name_gen)
+    member: member_class = member_class.from_tg_handle(tg_handle, current_olymp.id)
+    response = (f"<strong>{member_name.capitalize()} <code>{member.id}</code>:</strong>\n"
+                + member.display_data(verbose=True, olymp_status=current_olymp.status, technical_info=True, contact_note=False))
+    bot.send_message(message.chat.id, response)
+
+
+@bot.message_handler(commands=['view_participant', 'view_examiner'], roles=['owner'])
+def view_member_command(message: Message):
+    command = extract_command(message.text)
+    if command == 'view_participant':
+        view_member(message, Participant, 'участник', 'участника')
+    else:
+        view_member(message, Examiner, 'принимающий', 'принимающего')
 
 
 def list_members_page(message: Message, member_class: type[OlympMember], page: int, member_amount: int, title: str,
@@ -668,7 +692,8 @@ def list_members_page(message: Message, member_class: type[OlympMember], page: i
     member_list = get_func((page-1)*MEMBER_PAGE_SIZE, MEMBER_PAGE_SIZE)
     for member in member_list:
         text += (f"\n- {member.name} {member.surname} "
-                 f"({f'ID: <code>{member.tg_handle}</code>' if member.tg_handle.isnumeric() else f'@{member.tg_handle}'})")
+                 f"({member.display_tg_handle()})")
+    text += f"\nЧтобы просмотреть подробную информацию о ком-то одном, используй команду `/view_{member_class_name}`"
     bot.edit_message_text(text, message.chat.id, message.id, reply_markup=quick_markup(buttons))
 
 

@@ -1,10 +1,11 @@
 import sqlite3
 from db import DATABASE
 from utils import UserError, decline, provide_cursor, value_exists, update_in_table
+from enums import OlympStatus
 from queue_entry import QueueEntry, QueueStatus
 from problem import Problem, ProblemBlock, BlockType
 from data import OWNER_HANDLE
-from telebot.formatting import escape_markdown
+from telebot.formatting import escape_html
 
 
 class User:
@@ -154,6 +155,10 @@ class User:
         self.name = new_name
         self.surname = new_surname
         self.tg_handle = new_tg_handle
+    
+
+    def display_tg_handle(self, hide_id: bool = False) -> str:
+        return (f"Без хэндла" if hide_id else f"ID: <code>{self.tg_handle}</code>") if self.tg_handle.isnumeric() else f"@{self.tg_handle}"
 
 
     def __set(self, column: str, value):
@@ -310,6 +315,14 @@ class OlympMember(User):
             raise TypeError("Метод `create_as_new_user` предназначен для использования с классами `Participant` и `Examiner`")
         cls.create_as_new_user(*args, **kwargs)
 
+    def display_data(
+        self, verbose: bool = False, olymp_status: OlympStatus | None = None, 
+        technical_info: bool = False, contact_note: bool = True
+    ):
+        if type(self) == OlympMember:
+            raise TypeError("Метод `display_data` предназначен для использования с классами `Participant` и `Examiner`")
+        self.display_data(verbose, olymp_status, technical_info, contact_note)
+
     def _queue_entry(self, id_column: str):
         with sqlite3.connect(DATABASE) as conn:
             cur = conn.cursor()
@@ -441,8 +454,14 @@ class Participant(OlympMember):
         return super().from_id(id, "participants", error_user_not_found="Участник не найден")
 
 
-    def display_data(self, contact_note: bool = True):
+    def display_data(
+        self, verbose: bool = False, olymp_status: OlympStatus | None = None, 
+        technical_info: bool = False, contact_note: bool = True
+    ):
         response = f"{self.name} {self.surname}, {self.grade} класс"
+        if technical_info:
+            response += f" ({self.display_tg_handle()})"
+            response += f"\nАвторизация " + ("пройдена" if self.tg_id else "не пройдена")
         if contact_note: response += f"\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLE}"
         return response
     
@@ -530,7 +549,10 @@ class Participant(OlympMember):
             problem = self.problem_from_number(problem)
         with sqlite3.connect(DATABASE) as conn:
             cur = conn.cursor()
-            cur.execute("SELECT 1 FROM queue WHERE participant_id = ? AND problem_id = ? AND status = ?", (self.id, problem.id, QueueStatus.FAIL))
+            cur.execute(
+                "SELECT 1 FROM queue WHERE participant_id = ? AND problem_id = ? AND status = ?", 
+                (self.id, problem.id, QueueStatus.FAIL)
+            )
             fetch = cur.fetchall()
         if not fetch:
             return 3
@@ -707,8 +729,33 @@ class Examiner(OlympMember):
         return super().from_id(id, "examiners", error_user_not_found="Принимающий не найден")
 
 
-    def display_data(self, contact_note: bool = True):
-        response = f"{self.name} {self.surname}, ссылка: {self.conference_link}"
+    def display_problem_data(self):
+        amount = len(self.problems)
+        if amount == 0:
+            return "Задач не выбрано"
+        result = f"{decline(amount, 'Выбран', ('а', 'о', 'о'))} {amount} {decline(amount, 'задач', ('а', 'и', ''))}:"
+        for problem_id in self.problems:
+            problem = Problem.from_id(problem_id)
+            result += f"\n- <em>{escape_html(problem.name)}</em>"
+        return result
+    
+    def display_data(
+        self, verbose: bool = False, olymp_status: OlympStatus | None = None, 
+        technical_info: bool = False, contact_note: bool = True
+    ):
+        response = f"{self.name} {self.surname}"
+        if technical_info:
+            response += f" ({self.display_tg_handle()})"
+            response += f"\nАвторизация " + ("пройдена" if self.tg_id else "не пройдена")
+        response += f"\nCсылка на конференцию: {self.conference_link}"
+        if verbose:
+            if not olymp_status:
+                raise ValueError("При verbose=True необходимо указать olymp_status")
+            response += "\n" + self.display_problem_data()
+            if olymp_status in [OlympStatus.CONTEST, OlympStatus.QUEUE]:
+                response += f"\nСтатус: {'занят(-а)' if self.is_busy else 'свободен(-на)'}"
+            if olymp_status in [OlympStatus.CONTEST, OlympStatus.QUEUE, OlympStatus.RESULTS]:
+                response += f"\nОбсуждений с участниками: {self.busyness_level}"
         if contact_note: response += f"\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLE}"
         return response
     
@@ -758,16 +805,6 @@ class Examiner(OlympMember):
             cur.execute(q, (QueueStatus.WAITING,))
             fetch = cur.fetchone()
         return QueueEntry(*fetch) if fetch else None
-
-    def display_problem_data(self):
-        amount = len(self.problems)
-        if amount == 0:
-            return "Сейчас у тебя нет выбранных задач"
-        result = f"Сейчас у тебя {decline(amount, 'выбран', ('а', 'о', 'о'))} {amount} {decline(amount, 'задач', ('а', 'и', ''))}:"
-        for problem_id in self.problems:
-            problem = Problem.from_id(problem_id)
-            result += f"\n- _{escape_markdown(problem.name)}_"
-        return result
     
     def add_problem(self, problem: Problem | int):
         if isinstance(problem, Problem):
