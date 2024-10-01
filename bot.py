@@ -211,7 +211,7 @@ def send_authentication_confirmation(member: OlympMember, *, already_authenticat
             response += "\nЧтобы начать принимать задачи, используй команду /free"
         response += "\nЧтобы просмотреть информацию о себе, используй команду /my_info"
     elif current_olymp.status == OlympStatus.REGISTRATION:
-        response += ("\nДата и время начала олимпиады есть в <a href=\"vk.com/hseling.for.school\">нашей группе ВКонтакте</a> "
+        response += ("\n\nДата и время начала олимпиады есть в <a href=\"vk.com/hseling.for.school\">нашей группе ВКонтакте</a> "
                      "и в <a href=\"t.me/hselingforschool\">нашем Телеграм-канале</a>\n"
                      "Когда олимпиада начнётся, бот пришлёт тебе задания и ты сможешь записываться на сдачу задач через него")
     bot.send_message(member.tg_id, response)
