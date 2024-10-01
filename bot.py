@@ -1400,6 +1400,59 @@ def give_problem_block(message: Message):
     )
 
 
+@bot.message_handler(commands=['send_to_participant', 'send_to_examiner'], roles=['owner'])
+def send_command(message: Message):
+    if not current_olymp:
+        raise UserError("Нет текущей олимпиады")
+    message_to_send = message.reply_to_message
+    if not message_to_send:
+        raise UserError("Эту команду нужно использовать в ответ на сообщение")
+    tg_handle = get_arg(message, "Необходимо указать Телеграм-хэндл")
+    command = extract_command(message.text)
+    member_class = Participant if command == 'send_to_participant' else Examiner
+    member_class_name = "Участник" if command == 'send_to_participant' else "Принимающий"
+    member: Participant | Examiner = member_class.from_tg_handle(tg_handle, current_olymp.id)
+    if not member.tg_id:
+        raise UserError(f"{member.name} {member.surname} не авторизован(-а). Невозможно переслать сообщение…")
+    bot.copy_message(member.tg_id, message_to_send.chat.id, message_to_send.id)
+    bot.send_message(
+        message.chat.id,
+        f"{member_class_name} {member.name} {member.surname} получил оповещение!",
+        reply_to_message_id=message_to_send.id
+    )
+
+
+@bot.message_handler(commands=['announce_to_participants', 'announce_to_examiners', 'announce_to_everyone'], roles=['owner'])
+def announce_command(message: Message):
+    if not current_olymp:
+        raise UserError("Нет текущей олимпиады")
+    announcement = message.reply_to_message
+    if not announcement:
+        raise UserError("Эту команду нужно использовать в ответ на сообщение")
+    command = extract_command(message.text)
+    send_to_participants = (command != 'announce_to_examiners')
+    send_to_examiners = (command != 'announce_to_participants')
+    owner_response = ""
+    p_amount = 0
+    e_amount = 0
+    if send_to_participants:
+        for p in current_olymp.get_participants():
+            if p.tg_id:
+                bot.copy_message(p.tg_id, announcement.chat.id, announcement.id)
+                p_amount += 1
+        owner_response += f"{p_amount} {decline(p_amount, 'участник', ('', 'а', 'ов'))}"
+    if send_to_participants and send_to_examiners:
+        owner_response += " и "
+    if send_to_examiners:
+        for e in current_olymp.get_examiners():
+            if e.tg_id:
+                bot.copy_message(e.tg_id, announcement.chat.id, announcement.id)
+                e_amount += 1
+        owner_response += f"{e_amount} {decline(e_amount, 'принимающ', ('ий', 'их', 'их'))}"
+    owner_response += " получил" + ("и" if p_amount + e_amount > 1 else "") + " оповещение!"
+    bot.send_message(message.chat.id, owner_response, reply_to_message_id=announcement.id)
+
+
 @bot.message_handler(regexp=r"/.+")
 def other_commands(message: Message):
     raise UserError("Неизвестная команда")
