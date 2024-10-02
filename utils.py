@@ -1,6 +1,9 @@
 import sqlite3
 from telebot.types import Message, Document
+from telebot.util import generate_random_token
 from telebot import TeleBot
+from pathlib import Path
+import os
 from data import TOKEN
 import requests
 from functools import wraps
@@ -51,6 +54,19 @@ def get_file(message: Message, bot: TeleBot, no_file_error: str, expected_type: 
         raise UserError(f"Файл должен иметь расширение `{expected_type}`")
     file_path = bot.get_file(document.file_id).file_path
     return requests.get(f"https://api.telegram.org/file/bot{TOKEN}/{file_path}").content
+
+
+def save_downloaded_file(file: bytes):
+    dir = "downloaded_files"
+    Path(dir).mkdir(exist_ok=True)
+    dir_list = os.listdir(dir)
+    filename = generate_random_token()
+    while filename + ".pdf" in dir_list:
+        filename = generate_random_token()
+    path = os.path.join(dir, filename + ".pdf")
+    with open(path, "wb") as f:
+        f.write(file)
+    return path
 
 
 def provide_cursor(func):

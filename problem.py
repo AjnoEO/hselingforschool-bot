@@ -37,18 +37,6 @@ class Problem:
                 return None
             raise UserError("Задача не найдена")
         return cls(*fetch)
-        
-    # @classmethod
-    # def __from_number(cls, olymp_id: int, number_column: str, number_value: int):
-    #     if not number_value:
-    #         raise UserError(f"Необходимо указать номер задачи")
-    #     with sqlite3.connect(DATABASE) as conn:
-    #         cur = conn.cursor()
-    #         cur.execute(f"SELECT * FROM problems WHERE {number_column} = ?", (number_value,))
-    #         fetch = cur.fetchone()
-    #     if not fetch:
-    #         raise UserError(f"Задача номер {number_value} не найдена")
-    #     return cls(*fetch)
 
     @classmethod
     @provide_cursor
@@ -83,6 +71,10 @@ class Problem:
         )
         results = cursor.fetchall()
         return [ProblemBlock.from_columns(*fetch) for fetch in results]
+
+
+    def __str__(self):
+        return f"<em>{escape_html(self.name)}</em>"
 
 
     def __set(self, column: str, value):
@@ -145,13 +137,16 @@ class ProblemBlock:
     def from_block_type(
         cls,
         olymp_id: int,
-        block_type: BlockType
+        block_type: BlockType,
+        no_error: bool = False,
     ):
         with sqlite3.connect(DATABASE) as conn:
             cur = conn.cursor()
             cur.execute("SELECT * FROM problem_blocks WHERE olymp_id = ? AND block_type = ?", (olymp_id, block_type))
             fetch = cur.fetchone()
         if not fetch:
+            if no_error:
+                return None
             raise UserError("Блок задач не найден")
         return cls.from_columns(*fetch)
     
@@ -187,16 +182,22 @@ class ProblemBlock:
         return cls(created_id, olymp_id, problems, block_type, path)
     
 
-    def delete_file(self):
+    def delete_file(self, no_error: bool = False):
         if not self.path:
+            if no_error:
+                return
             raise UserError("Файла уже нет")
         os.remove(self.path)
         self.path = None
 
     @provide_cursor
     def delete(self, *, cursor: sqlite3.Cursor | None = None):
-        self.delete_file()
         cursor.execute("DELETE FROM problem_blocks WHERE id = ?", (self.id,))
+        self.delete_file(no_error = True)
+
+
+    def __str__(self):
+        return f"<code>{self.id}</code>" + (f" ({self.block_type})" if self.block_type else "")
 
 
     def __set(self, column: str, value):
@@ -212,6 +213,8 @@ class ProblemBlock:
     def block_type(self): return self.__block_type
     @block_type.setter
     def block_type(self, value: BlockType | None):
+        if value and ProblemBlock.from_block_type(self.olymp_id, value, no_error=True):
+            raise UserError(f"{value} уже есть в этой олимпиаде")
         self.__set("block_type", value)
         self.__block_type = value
     @property

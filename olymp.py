@@ -2,7 +2,7 @@ from enums import OlympStatus, QueueStatus
 import sqlite3
 from db import DATABASE
 from users import Participant, Examiner
-from problem import Problem
+from problem import Problem, ProblemBlock
 from queue_entry import QueueEntry
 from utils import UserError, value_exists, provide_cursor, update_in_table
 
@@ -161,13 +161,26 @@ class Olymp:
         return self.__amount("examiners")
     
     @provide_cursor
-    def get_problems(self, *, cursor: sqlite3.Cursor | None = None) -> list[Problem]:
-        cursor.execute("SELECT * FROM problems WHERE olymp_id = ? ORDER BY id", (self.id,))
+    def get_problems(self, *, sort: bool = False, cursor: sqlite3.Cursor | None = None) -> list[Problem]:
+        q = "SELECT * FROM problems WHERE olymp_id = ?"
+        if sort: q += " ORDER BY id"
+        cursor.execute(q, (self.id,))
         results = cursor.fetchall()
         return [Problem(*fetch) for fetch in results]
     
     def problems_amount(self) -> int:
         return self.__amount("problems")
+    
+    @provide_cursor
+    def get_problem_blocks(self, *, sort: bool = False, cursor: sqlite3.Cursor | None = None) -> list[ProblemBlock]:
+        q = "SELECT * FROM problem_blocks WHERE olymp_id = ?"
+        if sort: q += " ORDER BY id"
+        cursor.execute(q, (self.id,))
+        results = cursor.fetchall()
+        return [ProblemBlock.from_columns(*fetch) for fetch in results]
+    
+    def problem_blocks_amount(self) -> int:
+        return self.__amount("problem_blocks")
 
 
     def __set(self, column: str, value):

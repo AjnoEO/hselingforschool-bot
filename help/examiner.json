@@ -3,7 +3,9 @@
     "commands": [
         [
             ["problem_list", "Список задач"],
-            ["problem_info", "Информация о задаче"],
+            ["problem_info <ID>", "Информация о задаче"],
+            ["problem_block_list", "Список блоков задач"],
+            ["problem_block_info < ID | (JUNIOR|SENIOR)_(1|2|3) >", "Информация о блоке задач"],
             ["choose_problems", "Выбрать задачи для приёма (только до начала олимпиады)"]
         ],
         [

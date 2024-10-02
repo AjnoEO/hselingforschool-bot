@@ -13,12 +13,20 @@
             ],
             ["problem_create <название>", "Создать задачу"],
             ["problem_rename <ID> <новое название>", "Переименовать задачу"],
-            ["problem_block_create <задача1> <задача2> <задача3> [(JUNIOR|SENIOR)_(1|2|3)]", "Создать блок задач"]
+            ["problem_block_create <задача1> <задача2> <задача3> [(JUNIOR|SENIOR)_(1|2|3)]", "Создать блок задач"],
+            ["problem_block_update_type < ID | (JUNIOR|SENIOR)_(1|2|3) > < (JUNIOR|SENIOR)_(1|2|3) | 0 >", "Изменить тип блока задач"],
+            ["problem_block_update_file < ID | (JUNIOR|SENIOR)_(1|2|3) >", "Заменить файл блока задач"],
+            ["problem_block_delete_file < ID | (JUNIOR|SENIOR)_(1|2|3) | all >", "Удалить файл блока задач / файлы всех блоков олимпиады"],
+            ["problem_block_delete < ID | (JUNIOR|SENIOR)_(1|2|3) >", "Удалить блок задач"]
         ],
         [
+            ["olymp_list", "Список созданных олимпиад"],
+            ["olymp_select", "Выбрать текущую олимпиаду"],
             ["olymp_info", "Информация о текущей олимпиаде"],
             ["problem_list", "Список задач текущей олимпиады"],
-            ["problem_info <ID>", "Информация о задаче"]
+            ["problem_info <ID>", "Информация о задаче"],
+            ["problem_block_list", "Список блоков задач текущей олимпиады"],
+            ["problem_block_info < ID | (JUNIOR|SENIOR)_(1|2|3) >", "Информация о блоке задач"]
         ],
         [
             ["olymp_registration_start", "Начать регистрацию на олимпиаду"],

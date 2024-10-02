@@ -54,14 +54,14 @@ class BlockType(SqliteCompatibleEnum):
     SENIOR_2 = 4
     SENIOR_3 = 5
 
-    def is_junior(self) -> bool:
-        return self.value < 3
+    @property
+    def is_junior(self) -> bool: return self.value < 3
     
-    def is_senior(self) -> bool:
-        return not self.is_junior()
+    @property
+    def is_senior(self) -> bool: return not self.is_junior
     
-    def number(self) -> int:
-        return self.value % 3 + 1
+    @property
+    def number(self) -> int: return self.value % 3 + 1
     
     def __str__(self) -> str:
-        return f"{self.number()} блок для {'младших' if self.is_junior() else 'старших'}"
+        return f"{self.number} блок для {'младших' if self.is_junior else 'старших'}"
