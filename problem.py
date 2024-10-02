@@ -82,7 +82,7 @@ class Problem:
             (self.id, self.id, self.id)
         )
         results = cursor.fetchall()
-        return [ProblemBlock(*ProblemBlock._columns_to_init_args(*fetch)) for fetch in results]
+        return [ProblemBlock.from_columns(*fetch) for fetch in results]
 
 
     def __set(self, column: str, value):
@@ -113,6 +113,7 @@ class ProblemBlock:
         block_type: BlockType | int | None = None,
         path: str | None = None
     ):
+        """! Для создания из результата запроса к БД используй `ProblemBlock.from_columns`"""
         if len(problems) != 3:
             raise ValueError("В блоке должно быть три задачи")
         self.__id: int = id
@@ -126,9 +127,9 @@ class ProblemBlock:
         self.__path: str | None = path
 
     @classmethod
-    def _columns_to_init_args(cls, *args):
+    def from_columns(cls, *args):
         args = list(args)
-        return args[:2] + [args[4:]] + args[2:4]
+        return ProblemBlock(*args[:2], *[args[4:]], *args[2:4])
 
     @classmethod
     def from_id(cls, id: int):
@@ -138,8 +139,7 @@ class ProblemBlock:
             fetch = cur.fetchone()
         if not fetch:
             raise UserError("Блок задач не найден")
-        args = cls._columns_to_init_args(*fetch)
-        return cls(*args)
+        return cls.from_columns(*fetch)
     
     @classmethod
     def from_block_type(
@@ -153,8 +153,7 @@ class ProblemBlock:
             fetch = cur.fetchone()
         if not fetch:
             raise UserError("Блок задач не найден")
-        args = cls._columns_to_init_args(*fetch)
-        return cls(*args)  
+        return cls.from_columns(*fetch)
     
     @classmethod
     @provide_cursor
