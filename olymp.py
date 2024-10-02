@@ -102,6 +102,14 @@ class Olymp:
             return queue_entries[::-1]
 
 
+    @staticmethod
+    @provide_cursor
+    def list_all(*, cursor: sqlite3.Cursor | None = None):
+        cursor.execute("SELECT * FROM olymps")
+        results = cursor.fetchall()
+        return [Olymp(*fetch) for fetch in results]
+
+
     @provide_cursor
     def __amount(self, table: str, *, cursor: sqlite3.Cursor | None = None) -> int:
         cursor.execute(f"SELECT 1 FROM {table} WHERE olymp_id = ?", (self.id,))

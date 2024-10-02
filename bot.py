@@ -31,7 +31,6 @@ class MyExceptionHandler(telebot.ExceptionHandler):
     def handle(self, exc: Exception):
         message = None
         reply_markup = None
-        contact_note = (message.chat.id != OWNER_ID)
         tb = exc.__traceback__
         while (tb := tb.tb_next):
             # print(tb.tb_frame)
@@ -39,6 +38,7 @@ class MyExceptionHandler(telebot.ExceptionHandler):
                 message = tb.tb_frame.f_locals['message']
                 if isinstance(message, Message):
                     break
+        contact_note = (message.chat.id != OWNER_ID)
         if not message:
             return False
         handled = False
@@ -412,6 +412,28 @@ def olymp_finish(message: Message):
             if p.tg_id:
                 bot.send_message(p.tg_id, p_not_in_queue_message, reply_markup=participant_keyboard_olymp_finished)
         finish_olymp()
+
+
+@bot.message_handler(commands=['olymp_list'], roles=['owner'])
+def olymp_list(message: Message):
+    olymps = Olymp.list_all()
+    amount = len(olymps)
+    response = f"Имеется {amount} {decline(amount, 'олимпиад', ('а', 'ы', ''))}" + (":" if amount > 0 else "")
+    for olymp in olymps:
+        response += f"\n- <em>{olymp.name}</em> (<code>{olymp.status.name}</code>)"
+    bot.send_message(message.chat.id, response)
+
+
+@bot.message_handler(commands=['olymp_select'], roles=['owner'])
+def olymp_select(message: Message):
+    global current_olymp
+    if current_olymp and current_olymp.status != OlympStatus.RESULTS:
+        raise UserError("Заверши текущую олимпиаду, чтобы выбрать другую")
+    olymp_name = get_arg(message, "Необходимо указать название олимпиады")
+    if current_olymp and current_olymp.name == olymp_name:
+        raise UserError(f"Олимпиада <em>{olymp_name}</em> уже выбрана как текущая")
+    current_olymp = Olymp.from_name(olymp_name)
+    bot.send_message(message.chat.id, f"Олимпиада <em>{current_olymp.name}</em> выбрана как текущая")
 
 
 @bot.message_handler(commands=['olymp_create'], roles=['owner'])
@@ -1538,4 +1560,13 @@ def other_messages(message: Message):
 
 
 print("Запускаю бота...")
+
+owner_startup_message = "Бот запущен!"
+if not current_olymp:
+    owner_startup_message += (
+        "\nТекущая олимпиада не выбрана. Чтобы установить текущую олимпиаду, используй команду <code>"
+        + escape_html("/olymp_select <название>")
+        + "</code>")
+bot.send_message(OWNER_ID, owner_startup_message)
+
 bot.infinity_polling()
