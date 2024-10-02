@@ -11,7 +11,7 @@
                 "upload_examiners", 
                 "Загрузить таблицу с принимающими. Столбцы: <code>name</code>, <code>surname</code>, <code>conference_link</code>, <code>tg_handle</code>"
             ],
-            ["problem_create <название>", "Создать задачу"],
+            ["problem_create <название>", "Создать задачу. Можно перечислить несколько названий, каждое на своей строчке"],
             ["problem_rename <ID> <новое название>", "Переименовать задачу"],
             ["problem_block_create <задача1> <задача2> <задача3> [(JUNIOR|SENIOR)_(1|2|3)]", "Создать блок задач"],
             ["problem_block_update_type < ID | (JUNIOR|SENIOR)_(1|2|3) > < (JUNIOR|SENIOR)_(1|2|3) | 0 >", "Изменить тип блока задач"],

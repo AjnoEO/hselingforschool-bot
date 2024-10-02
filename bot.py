@@ -510,12 +510,12 @@ def upload_members(message: Message, required_key: str, key_description: str, me
                    term_stem: str, term_endings: tuple[str, str, str], term_endings_gen: tuple[str, str, str]):
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
-    if current_olymp.status != OlympStatus.TBA:
-        raise UserError("Регистрация на олимпиаду или олимпиада уже начата")
+    if current_olymp.status not in [OlympStatus.TBA, OlympStatus.REGISTRATION]:
+        raise UserError("Олимпиада уже начата")
     required_columns = ["name", "surname", "tg_handle", required_key]
     file_data = get_file(message, bot, "Необходимо указать Excel-таблицу", ".xlsx")
     member_table = pd.read_excel(BytesIO(file_data))
-    if not set(member_table.columns).issubset(set(required_columns)):
+    if not set(required_columns).issubset(set(member_table.columns)):
         raise UserError("Таблица должна содержать столбцы " + ', '.join([f'<code>{col}</code>' for col in required_columns]))
     old_members_amount = 0
     updated_users: list[tuple[User | member_class, member_class]] = []
@@ -983,9 +983,24 @@ def update_queue_entry_problem(message: Message):
 def problem_create(message: Message):
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
-    name = get_arg(message, "Для задачи необходимо название")
-    problem = Problem.create(current_olymp.id, name)
-    bot.send_message(message.chat.id, f"Задача {problem} добавлена! ID: <code>{problem.id}</code>")
+    if '\n' not in message.text:
+        name = get_arg(message, "Для задачи необходимо название")
+        problem = Problem.create(current_olymp.id, name)
+        bot.send_message(message.chat.id, f"Задача {problem} добавлена! ID: <code>{problem.id}</code>")
+        return
+    names = message.text.split(sep='\n')[1:]
+    problems: list[Problem] = []
+    for name in names:
+        if not Problem.from_name(name, current_olymp.id, no_error=True):
+            problems.append(Problem.create(current_olymp.id, name))
+    amount = len(problems)
+    response = f"{amount} {decline(amount, 'задач', ('а', 'и', ''))} {decline(amount, 'добавлен', ('а', 'о', 'о'))}!"
+    for p in problems:
+        response += f"\n- <code>{p.id}</code> {p}"
+    old_amount = len(names) - amount
+    if old_amount > 0:
+        response += f"\n{old_amount} {decline(old_amount, 'задач', ('а', 'и', ''))} уже есть в олимпиаде"
+    bot.send_message(message.chat.id, response)
 
 
 @bot.message_handler(commands=['problem_rename'], roles=['owner'])

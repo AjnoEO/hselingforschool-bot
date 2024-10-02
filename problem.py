@@ -45,17 +45,20 @@ class Problem:
         olymp_id: int,
         name: str,
         *,
+        no_error: bool = False,
         cursor: sqlite3.Cursor | None = None,
     ):
         """
         Добавить задачу в таблицу problems
         """
-        cursor.execute("SELECT id, name FROM problems WHERE olymp_id = ?", (olymp_id,))
+        cursor.execute("SELECT * FROM problems WHERE olymp_id = ?", (olymp_id,))
         fetch = cursor.fetchall()
         for f in fetch:
-            pr_id = f[0]
-            if f[1] == name:
-                raise UserError(f"Название <em>{escape_html(name)}</em> уже занято задачей <code>{pr_id}</code>")
+            pr = cls(*f)
+            if pr.name == name:
+                if no_error:
+                    return pr
+                raise UserError(f"Название {pr} уже занято задачей <code>{pr.id}</code>")
         values = (olymp_id, name)
         cursor.execute("INSERT INTO problems(olymp_id, name) VALUES (?, ?)", values)
         cursor.connection.commit()
