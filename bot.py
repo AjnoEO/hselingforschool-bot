@@ -37,9 +37,9 @@ class MyExceptionHandler(telebot.ExceptionHandler):
                 message = tb.tb_frame.f_locals['message']
                 if isinstance(message, Message):
                     break
-        contact_note = (message.chat.id != OWNER_ID)
         if not message:
             return False
+        contact_note = (message.chat.id != OWNER_ID)
         handled = False
         if isinstance(exc, UserError):
             error_message = "⚠️ Ошибка!\n" + str(exc)
@@ -671,6 +671,23 @@ def edit_member_command(message: Message):
         )
 
 
+def return_participant_to_queue(participant: Participant):
+    queue_entry = participant.queue_entry
+    new_examiner_id = queue_entry.look_for_examiner()
+    if new_examiner_id:
+        new_examiner: Examiner = Examiner.from_id(new_examiner_id)
+        new_examiner.assign_to_queue_entry(queue_entry)
+        announce_queue_entry(queue_entry)
+    else:
+        problem = Problem.from_id(queue_entry.problem_id)
+        problem_number = participant.get_problem_number(problem)
+        participant_response = (f"Вернули тебя в начало очереди на задачу {problem_number}: {problem}. "
+                                f"Свободных принимающих пока нет, но бот напишет тебе, когда подходящий принимающий освободится")
+        if PROMOTE_COMMANDS:
+            participant_response += f"Чтобы покинуть очередь, используй команду /leave_queue"
+        bot.send_message(participant.tg_id, participant_response, reply_markup=participant_keyboard_in_queue)
+
+
 @bot.message_handler(commands=['set_examiner_problems'], roles=['owner'])
 def set_examiner_problems(message: Message):
     if not current_olymp:
@@ -685,10 +702,28 @@ def set_examiner_problems(message: Message):
     examiner.set_problems(problems)
     examiner_response = "Твой список задач обновлён:\n"
     for problem_id in problems:
-        examiner_response += f"- {Problem.from_id(problem_id)}</em>\n"
+        examiner_response += f"- {Problem.from_id(problem_id)}\n"
     if examiner.tg_id:
         bot.send_message(examiner.tg_id, examiner_response)
     bot.send_message(message.chat.id, f"Список задач принимающего {examiner.name} {examiner.surname} обновлён")
+    queue_entry = examiner.queue_entry
+    if queue_entry and queue_entry.problem_id not in examiner.problems:
+        participant: Participant = Participant.from_id(queue_entry.participant_id)
+        problem: Problem = Problem.from_id(queue_entry.problem_id)
+        examiner.withdraw_from_queue_entry()
+        bot.send_message(
+            examiner.tg_id,
+            f"Ты больше не можешь принимать задачу {problem}. "
+            f"Бот снял тебя с приёма задачи у участника {participant.name} {participant.surname}\n"
+            f"⚠️ Бот установил тебе статус \"занят(-а)\". Пожалуйста, используй команду /free, чтобы продолжить принимать задачи!",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return_participant_to_queue(participant)
+    elif not examiner.is_busy:
+        queue_entry = examiner.look_for_queue_entry()
+        if queue_entry:
+            examiner.assign_to_queue_entry(queue_entry)
+            announce_queue_entry(queue_entry)
 
 
 def view_member(
@@ -775,7 +810,7 @@ def list_members_page(message: Message, member_class: type[OlympMember], page: i
     for member in member_list:
         text += (f"\n- {member.name} {member.surname} "
                  f"({member.display_tg_handle()})")
-    text += f"\nЧтобы просмотреть подробную информацию о ком-то одном, используй команду `/view_{member_class_name}`"
+    text += f"\nЧтобы просмотреть подробную информацию о ком-то одном, используй команду <code>/view_{member_class_name}</code>"
     bot.edit_message_text(text, message.chat.id, message.id, reply_markup=quick_markup(buttons))
 
 
@@ -1400,20 +1435,7 @@ def withdraw_examiner(message: Message):
                          f"⚠️ Бот установил тебе статус \"занят(-а)\". "
                          f"Когда вернёшься, используй команду /free, чтобы продолжить принимать задачи")
     bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
-    queue_entry = participant.queue_entry
-    new_examiner_id = queue_entry.look_for_examiner()
-    if new_examiner_id:
-        new_examiner: Examiner = Examiner.from_id(new_examiner_id)
-        new_examiner.assign_to_queue_entry(queue_entry)
-        announce_queue_entry(queue_entry)
-    else:
-        problem = Problem.from_id(queue_entry.problem_id)
-        problem_number = participant.get_problem_number(problem)
-        participant_response = (f"Вернули тебя в начало очереди на задачу {problem_number}: {problem}. "
-                                f"Свободных принимающих пока нет, но бот напишет тебе, когда подходящий принимающий освободится")
-        if PROMOTE_COMMANDS:
-            participant_response += f"Чтобы покинуть очередь, используй команду /leave_queue"
-        bot.send_message(participant.tg_id, participant_response, reply_markup=participant_keyboard_in_queue)
+    return_participant_to_queue(participant)
 
 
 @bot.callback_query_handler(
@@ -1458,19 +1480,7 @@ def examiner_didnt_come_handler(callback_query: CallbackQuery):
                      f"(запись в очереди: <code>{queue_entry.id}</code>)")
     bot.send_message(OWNER_ID, owner_message)
     bot.answer_callback_query(callback_query.id, "Мы сообщили организаторам о проблеме")
-    new_examiner_id = queue_entry.look_for_examiner()
-    if new_examiner_id:
-        new_examiner: Examiner = Examiner.from_id(new_examiner_id)
-        new_examiner.assign_to_queue_entry(queue_entry)
-        announce_queue_entry(queue_entry)
-    else:
-        problem = Problem.from_id(queue_entry.problem_id)
-        problem_number = participant.get_problem_number(problem)
-        participant_response = (f"Вернули тебя в начало очереди на задачу {problem_number}: {problem}. "
-                                f"Свободных принимающих пока нет, но бот напишет тебе, когда подходящий принимающий освободится")
-        if PROMOTE_COMMANDS:
-            participant_response += f"Чтобы покинуть очередь, используй команду /leave_queue"
-        bot.send_message(participant.tg_id, participant_response, reply_markup=participant_keyboard_in_queue)
+    return_participant_to_queue(participant)
 
 
 @bot.message_handler(regexp=rf'(/queue( \d+)?|{JOIN_QUEUE_BUTTON})', roles=['participant'], olymp_statuses=[OlympStatus.CONTEST])
