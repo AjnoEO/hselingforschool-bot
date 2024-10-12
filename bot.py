@@ -1781,7 +1781,7 @@ def other_messages(message: Message):
                     f"Если у тебя есть организационные вопросы касательно олимпиады, "
                     f"пиши нам в <a href=\"vk.com/hseling.for.school\">группе ВКонтакте</a> "
                     f"и в <a href=\"t.me/hselingforschool\">Телеграм-канале</a>\n"
-                    f"Если у тебя есть вопросы по работе бота, пиши {OWNER_ID}",
+                    f"Если у тебя есть вопросы по работе бота, пиши {OWNER_HANDLE}",
                     contact_note=False)
 
 
