@@ -1364,7 +1364,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
                                         f"чтобы её сдать")
             examiner_response = (f"Задача {problem} отмечена как несданная участником {participant.name} {participant.surname}")
         elif queue_entry.status == QueueStatus.CANCELED:
-            participant_response = (f"Сдача задачи {problem_number}: {problem}</em> отменена. Ты больше не в очереди")
+            participant_response = (f"Сдача задачи {problem_number}: {problem} отменена. Ты больше не в очереди")
             if current_olymp.status == OlympStatus.CONTEST:
                 participant_response += ". Попытка не потрачена"
             examiner_response = (f"Сдача задачи {problem} участником {participant.name} {participant.surname} отменена")
