@@ -1,11 +1,12 @@
 import os
+from pathlib import Path
 import re
-from typing import Callable, Any
+from typing import Callable
 import json
 from db import create_update_db
 from data import TOKEN, OWNER_ID, OWNER_HANDLE
 import telebot
-from telebot.types import Message, CallbackQuery, InputFile, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telebot.types import Message, CallbackQuery, InputFile, InputMediaDocument, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telebot.formatting import escape_html
 from telebot.custom_filters import SimpleCustomFilter, AdvancedCustomFilter
 from telebot.util import quick_markup, extract_command
@@ -15,6 +16,8 @@ from problem import Problem, ProblemBlock, BlockType
 from queue_entry import QueueEntry, QueueStatus
 from utils import UserError, decline, get_arg, get_n_args, get_file, save_downloaded_file
 import pandas as pd
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment
 from io import BytesIO
 
 
@@ -53,7 +56,7 @@ class MyExceptionHandler(telebot.ExceptionHandler):
             line_number = traceback.tb_lineno
             error_message = (f"⚠️ Во время выполнения операции произошла ошибка:\n"
                              f"<code>{exc.__class__.__name__} "
-                             f"({filename}, строка {line_number}): {exc}</code>")
+                             f"({filename}, строка {line_number}): {' '.join([escape_html(str(arg)) for arg in exc.args])}</code>")
         if contact_note:
             error_message += f"\nЕсли тебе кажется, что это баг, сообщи {OWNER_HANDLE}"
         bot.send_message(message.chat.id, error_message, reply_markup=reply_markup)
@@ -269,17 +272,14 @@ def help(message: Message):
 def participant_stats(message: Message):
     participant: Participant = Participant.from_tg_id(message.from_user.id, current_olymp.id)
     response = f"Информация о сдачах задач:\n"
-    sum = 0
-    for i, problem in enumerate(participant.problems()):
+    sum, problem_info = participant.results()
+    for i, (problem, success, number) in enumerate(problem_info):
         response += f"- <strong>{i+1}: {problem}</strong> — "
-        attempts = participant.attempts_left(problem)
-        if participant.solved(problem):
-            points = (2+(i//3)*2) + attempts
-            response += f"решена ({points} {decline(attempts, 'балл', ('', 'а', 'ов'))})\n"
-            sum += points
+        if success:
+            response += f"решена ({number} {decline(number, 'балл', ('', 'а', 'ов'))})\n"
         else:
-            response += (f"не решена, {decline(attempts, 'остал', ('ась', 'ось', 'ось'))} "
-                         f"{attempts} {decline(attempts, 'попыт', ('ка', 'ки', 'ок'))} из 3\n")
+            response += (f"не решена, {decline(number, 'остал', ('ась', 'ось', 'ось'))} "
+                         f"{number} {decline(number, 'попыт', ('ка', 'ки', 'ок'))} из 3\n")
     response += f"Набрано баллов: <strong>{sum}</strong>"
     bot.send_message(
         message.chat.id, response,
@@ -518,7 +518,7 @@ def upload_members(message: Message, required_key: str, key_description: str, me
     if not set(required_columns).issubset(set(member_table.columns)):
         raise UserError("Таблица должна содержать столбцы " + ', '.join([f'<code>{col}</code>' for col in required_columns]))
     old_members_amount = 0
-    updated_users: list[tuple[User | member_class, member_class]] = []
+    updated_users: list[tuple[User | OlympMember, OlympMember]] = []
     for _, m in member_table.iterrows():
         m["tg_handle"] = str(m["tg_handle"])
         old_user = None
@@ -530,7 +530,7 @@ def upload_members(message: Message, required_key: str, key_description: str, me
             if value != m[required_key]:
                 old_user = member
             old_members_amount += 1
-        member: member_class = member_class.create_as_new_user(**m, olymp_id=current_olymp.id, ok_if_user_exists=True, ok_if_exists=True)
+        member: OlympMember = member_class.create_as_new_user(**m, olymp_id=current_olymp.id, ok_if_user_exists=True, ok_if_exists=True)
         if old_user:
             updated_users.append((old_user, member))
     amount = member_table.shape[0] - old_members_amount
@@ -580,7 +580,7 @@ def add_member(message: Message, min_args: int, max_args: int, no_arg_error: str
         message, min_args, max_args, no_arg_error
     )
     other_args = additional_values_func(other_args)
-    member: member_class = member_class.create_as_new_user(
+    member: OlympMember = member_class.create_as_new_user(
         tg_handle, name, surname, olymp_id=current_olymp.id,
         **other_args, ok_if_user_exists=True
     )
@@ -624,15 +624,15 @@ def edit_member(
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
     possible_keys = ['tg_handle', 'name', 'surname'] + list(other_args.keys())
-    def tg_setter(member: member_class, value: str): member.tg_handle = value
+    def tg_setter(member: OlympMember, value: str): member.tg_handle = value
     other_args['tg_handle'] = (
         'Телеграм-хэндл', 
         lambda member: member.display_tg_handle(hide_id=True),
         tg_setter
     )
-    def name_setter(member: member_class, value: str): member.name = value
+    def name_setter(member: OlympMember, value: str): member.name = value
     other_args['name'] = ('Имя', lambda member: member.name, name_setter)
-    def surname_setter(member: member_class, value: str): member.surname = value
+    def surname_setter(member: OlympMember, value: str): member.surname = value
     other_args['surname'] = ('Фамилия', lambda member: member.surname, surname_setter)
     command = extract_command(message.text)
     syntax_hint = ("Синтаксис команды: <code>"
@@ -642,7 +642,7 @@ def edit_member(
     if key not in possible_keys:
         raise UserError(syntax_hint)
     if key == 'grade': value = int(value)
-    member: member_class = member_class.from_tg_handle(tg_handle, current_olymp.id)
+    member: OlympMember = member_class.from_tg_handle(tg_handle, current_olymp.id)
     old_value = other_args[key][1](member)
     other_args[key][2](member, value)
     change = f"{other_args[key][0]}: {old_value} → {value}"
@@ -747,7 +747,7 @@ def view_member(
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
     tg_handle = get_arg(message, "Необходимо указать Телеграм-хэндл " + member_name_gen)
-    member: member_class = member_class.from_tg_handle(tg_handle, current_olymp.id)
+    member: OlympMember = member_class.from_tg_handle(tg_handle, current_olymp.id)
     response = (f"<strong>{member_name.capitalize()} <code>{member.id}</code>:</strong>\n"
                 + member.display_data(verbose=True, olymp_status=current_olymp.status, technical_info=True, contact_note=False))
     bot.send_message(message.chat.id, response)
@@ -1707,6 +1707,56 @@ def announce_command(message: Message):
         owner_response += f"{e_amount} {decline(e_amount, 'принимающ', ('ий', 'их', 'их'))}"
     owner_response += " получил" + ("и" if p_amount + e_amount > 1 else "") + " оповещение!"
     bot.send_message(message.chat.id, owner_response, reply_to_message_id=announcement.id)
+
+
+@bot.message_handler(
+    commands=['results'],
+    roles=['owner', 'examiner'],
+    olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE, OlympStatus.RESULTS]
+)
+def results_command(message: Message):
+    COLUMNS = {
+        'ID': 7.0,
+        'ФИО': 25.0,
+        'Класс': 10.0
+    }
+    for n in range(1, 10): COLUMNS[str(n)] = 10.3
+    COLUMNS['Сумма'] = 10.3
+    junior_table = pd.DataFrame(columns=COLUMNS.keys())
+    senior_table = pd.DataFrame(columns=COLUMNS.keys())
+    for participant in current_olymp.get_participants():
+        sum, problem_results = participant.results()
+        row = [None, f'{participant.surname} {participant.name}', participant.grade]
+        for _, successful, number in problem_results:
+            row.append(number if successful else 0)
+        row.append(sum)
+        if participant.is_junior: junior_table = pd.concat([junior_table, pd.DataFrame([row], columns=COLUMNS.keys())], ignore_index=True)
+        else:                     senior_table = pd.concat([senior_table, pd.DataFrame([row], columns=COLUMNS.keys())], ignore_index=True)
+    dir = "created_files"
+    Path(dir).mkdir(exist_ok=True)
+    excel_path = os.path.join("created_files", f"results_{current_olymp.id}.xlsx")
+    JUNIOR_SHEET_NAME = "Результаты 8—9"
+    SENIOR_SHEET_NAME = "Результаты 10—11"
+    with pd.ExcelWriter(excel_path) as writer:
+        junior_table.to_excel(writer, JUNIOR_SHEET_NAME, index=False, freeze_panes=(1, 3))
+        senior_table.to_excel(writer, SENIOR_SHEET_NAME, index=False, freeze_panes=(1, 3))
+        book = writer.book
+        for sheetname in book.sheetnames:
+            sheet = book[sheetname]
+            for i, (column_name, column_size) in enumerate(COLUMNS.items()):
+                col_letter = chr(ord('A')+i)
+                sheet.column_dimensions[col_letter].width = column_size
+                if i >= 2:
+                    for cell in sheet[col_letter]:
+                        cell.alignment = Alignment(horizontal='center')
+                if column_name in ['ID', 'Сумма']:
+                    for cell in sheet[col_letter]:
+                        cell.font = Font(bold=True)
+    bot.send_document(
+        message.chat.id, 
+        InputFile(excel_path, file_name=f"{current_olymp.name.replace(' ', '_')}_результаты.xlsx"),
+        caption="Результаты олимпиады"
+    )
 
 
 @bot.message_handler(discussing_examiner=True)

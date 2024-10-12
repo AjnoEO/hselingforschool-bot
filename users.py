@@ -558,6 +558,20 @@ class Participant(OlympMember):
             return 3
         return 3 - len(fetch)
 
+    def results(self) -> tuple[int, list[tuple[Problem, bool, int]]]:
+        """
+        Подсчитывает все результаты. Возвращает (`sum`, [(`problem`, `is_succesful`, `attempts_left_or_points`)])
+        """
+        sum = 0
+        detailed_results: list[tuple[Problem, bool, int]] = []
+        for i, problem in enumerate(self.problems()):
+            attempts_left_or_points = self.attempts_left(problem)
+            if is_successful := self.solved(problem):
+                attempts_left_or_points = (2+(i//3)*2) + attempts_left_or_points
+                sum += attempts_left_or_points
+            detailed_results.append((problem, is_successful, attempts_left_or_points))
+        return (sum, detailed_results)
+
 
     @property
     def queue_entry(self) -> QueueEntry | None:

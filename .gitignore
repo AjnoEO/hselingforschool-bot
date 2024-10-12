@@ -4,6 +4,7 @@ database/version.txt
 
 # Рабочие файлы
 downloaded_files
+created_files
 
 # Конфиденциальная инфа
 config.ini
