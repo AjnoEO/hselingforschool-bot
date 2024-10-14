@@ -1397,7 +1397,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
             )
         else:
             bot.send_message(participant.tg_id, participant_response, reply_markup=keyboard)
-        bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
+        bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove() if not examiner.queue_entry else None)
         if current_olymp.status == OlympStatus.QUEUE and not unhandled_queue_left:
             finish_olymp()
         return
