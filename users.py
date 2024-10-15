@@ -383,7 +383,7 @@ class Participant(OlympMember):
         if exists:
             q = (f"UPDATE participants SET grade = ?"
                  f"{', last_block_number = ?' if last_block_number else ''} "
-                 f"WHERE olymp_id = ?, user_id = ?")
+                 f"WHERE olymp_id = ? AND user_id = ?")
             p = [grade] + ([last_block_number] if last_block_number else []) + [olymp_id, user_id]
         else:
             q = (f"INSERT INTO participants(user_id, olymp_id, grade"
