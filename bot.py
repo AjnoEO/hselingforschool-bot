@@ -84,11 +84,18 @@ class RolesFilter(AdvancedCustomFilter): # owner, examiner, participant
 class OlympStatusFilter(AdvancedCustomFilter):
     key = 'olymp_statuses'
     @staticmethod
-    def check(_: Message, statuses: list[OlympStatus]):
+    def check(message: Message, statuses: list[OlympStatus]):
         if not current_olymp:
             return None in statuses
         return current_olymp.status in statuses
-    
+
+class DocCommandsFilter(AdvancedCustomFilter):
+    key = 'doc_commands'
+    @staticmethod
+    def check(message: Message, commands: list[str]):
+        command = extract_command(message.text or message.caption)
+        return (command in commands)
+
 class DiscussingExaminerFilter(SimpleCustomFilter):
     key = 'discussing_examiner'
     @staticmethod
@@ -101,6 +108,7 @@ class DiscussingExaminerFilter(SimpleCustomFilter):
         
 bot.add_custom_filter(RolesFilter())
 bot.add_custom_filter(OlympStatusFilter())
+bot.add_custom_filter(DocCommandsFilter())
 bot.add_custom_filter(DiscussingExaminerFilter())
 
 current_olymp = Olymp.current()
@@ -556,15 +564,15 @@ def upload_members(message: Message, required_key: str, key_description: str, me
     bot.send_message(message.chat.id, response)
 
 
-@bot.message_handler(commands=['upload_participants', 'upload_examiners'], roles=['owner'], content_types=['text', 'document'])
+@bot.message_handler(doc_commands=['upload_participants', 'upload_examiners'], roles=['owner'], content_types=['text', 'document'])
 def upload_members_command(message: Message):
-    command = extract_command(message.text)
+    command = extract_command(message.text or message.caption)
     if command == 'upload_participants':
         upload_members(
             message, "grade", "{0} класс",
             Participant, 'участник', ('', 'а', 'ов'), ('а', 'ов', 'ов')
         )
-    else:
+    elif command == 'upload_examiners':
         upload_members(
             message, "conference_link", "Ссылка на конференцию: {0}",
             Examiner, 'принимающ', ('ий', 'их', 'их'), ('его', 'их', 'их')
@@ -1086,7 +1094,7 @@ def problem_info(message: Message):
     bot.send_message(message.chat.id, response)
 
 
-@bot.message_handler(commands=['problem_block_create'], roles=['owner'])
+@bot.message_handler(doc_commands=['problem_block_create'], roles=['owner'], content_types=['text', 'document'])
 def problem_block_create(message: Message):
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
