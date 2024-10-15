@@ -19,9 +19,7 @@ class User:
     ):
         self.__user_id: int = user_id
         self.__tg_id: int | None = tg_id
-        self.__tg_handle: str = tg_handle.lower()
-        if self.__tg_handle.startswith("@"):
-            self.__tg_handle = self.__tg_handle[1:]
+        self.__tg_handle: str = self.conform_tg_handle(tg_handle)
         self.__name: str = name
         self.__surname: str = surname
 
@@ -40,9 +38,7 @@ class User:
         """
         Добавить пользователя в таблицу users
         """
-        tg_handle = tg_handle.lower()
-        if tg_handle.startswith("@"):
-            tg_handle = tg_handle[1:]
+        tg_handle = cls.conform_tg_handle(tg_handle)
         exists = value_exists("users", {"tg_handle": tg_handle})
         if exists and not ok_if_exists:
             raise UserError(f"Пользователь @{tg_handle} уже есть в базе")
@@ -75,9 +71,7 @@ class User:
         error_ids_dont_match: str = "Данные идентификаторы не соответствуют"
     ):
         if tg_handle:
-            tg_handle = tg_handle.lower()
-            if tg_handle.startswith("@"):
-                tg_handle = tg_handle[1:]
+            tg_handle = cls.conform_tg_handle(tg_handle)
         if tg_id:
             checked_column = "tg_id"
             given_value = tg_id
@@ -135,6 +129,14 @@ class User:
         return cls.from_db(tg_handle=tg_handle)
     
 
+    @staticmethod
+    def conform_tg_handle(tg_handle: str):
+        tg_handle = tg_handle.lower().strip()
+        if tg_handle.startswith("@"):
+            tg_handle = tg_handle[1:]
+        return tg_handle
+
+
     @provide_cursor
     def remove(self, *, cursor: sqlite3.Cursor | None = None):
         cursor.execute("DELETE FROM users WHERE user_id = ?", (self.user_id,))
@@ -170,9 +172,7 @@ class User:
     def tg_handle(self): return self.__tg_handle
     @tg_handle.setter
     def tg_handle(self, value: str):
-        value = value.lower()
-        if value.startswith("@"):
-            value = value[1:]
+        value = self.conform_tg_handle(value)
         self.__set('tg_handle', value.lower())
         self.__tg_handle = value
     @property
