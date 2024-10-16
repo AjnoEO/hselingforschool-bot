@@ -3,12 +3,15 @@ from pathlib import Path
 import re
 from typing import Callable
 import json
-from db import create_update_db
+from db import create_update_db, StateDBStorage
 from data import TOKEN, OWNER_ID, OWNER_HANDLE
 import telebot
-from telebot.types import Message, CallbackQuery, InputFile, InputMediaDocument, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telebot.types import Message, CallbackQuery, InputFile, ReplyKeyboardMarkup, ReplyKeyboardRemove, ReplyParameters
 from telebot.formatting import escape_html
-from telebot.custom_filters import SimpleCustomFilter, AdvancedCustomFilter
+from telebot.custom_filters import SimpleCustomFilter, AdvancedCustomFilter, StateFilter
+from telebot.states import State, StatesGroup
+from telebot.states.sync.context import StateContext
+from telebot.states.sync.middleware import StateMiddleware
 from telebot.util import quick_markup, extract_command
 from olymp import Olymp, OlympStatus
 from users import User, OlympMember, Participant, Examiner
@@ -63,7 +66,20 @@ class MyExceptionHandler(telebot.ExceptionHandler):
         return handled
 
 
-bot = telebot.TeleBot(TOKEN, parse_mode="HTML", disable_web_page_preview=True, exception_handler=MyExceptionHandler())
+bot = telebot.TeleBot(
+    TOKEN,
+    parse_mode="HTML",
+    state_storage=StateDBStorage(),
+    use_class_middlewares=True,
+    disable_web_page_preview=True,
+    exception_handler=MyExceptionHandler()
+)
+
+class ExaminerStates(StatesGroup):
+    choosing_problems = State()
+
+bot.add_custom_filter(StateFilter(bot))
+bot.setup_middleware(StateMiddleware(bot))
 
 class RolesFilter(AdvancedCustomFilter): # owner, examiner, participant
     key = 'roles'
@@ -1264,7 +1280,7 @@ def delete_block_handler(callback_query: CallbackQuery):
 
 
 @bot.message_handler(commands=['choose_problems'], roles=['examiner'], olymp_statuses=[OlympStatus.REGISTRATION])
-def examiner_problems(message: Message):
+def examiner_problems(message: Message, state: StateContext):
     examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
     response = "Выбери задачу, чтобы добавить её в свой список задач или убрать её из него\n" + examiner.display_problem_data()
     all_problems = current_olymp.get_problems(sort=True)
@@ -1278,12 +1294,14 @@ def examiner_problems(message: Message):
     if len(problem_row) > 0:
         reply_buttons.row(*problem_row)
     reply_buttons.row("[Закончить выбор]")
+    state.set(ExaminerStates.choosing_problems)
     bot.send_message(message.chat.id, response, reply_markup=reply_buttons)
-    bot.register_next_step_handler_by_chat_id(message.chat.id, examiner_chooses_problem)
 
 
-def examiner_chooses_problem(message: Message):
+@bot.message_handler(state=ExaminerStates.choosing_problems, roles=['examiner'])
+def examiner_chooses_problem(message: Message, state: StateContext):
     if message.text == "[Закончить выбор]":
+        state.delete()
         bot.send_message(message.chat.id, "Выбор сохранён", reply_markup=ReplyKeyboardRemove())
         return
     problem = Problem.from_name(message.text, current_olymp.id)
@@ -1296,7 +1314,6 @@ def examiner_chooses_problem(message: Message):
         response = f"Задача {problem} добавлена в твой список задач"
     response += "\n" + examiner.display_problem_data()
     bot.send_message(message.chat.id, response)
-    bot.register_next_step_handler_by_chat_id(message.chat.id, examiner_chooses_problem)
 
 
 @bot.message_handler(
