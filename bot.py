@@ -268,17 +268,18 @@ def help(message: Message):
         roles.append('examiner')
     if current_olymp and Participant.from_tg_id(message.from_user.id, current_olymp.id, no_error=True):
         roles.append('participant')
-    role_titles = len(roles) > 1
+    several_roles = (len(roles) > 1)
     for role in roles:
         with open(os.path.join("help", f"{role}.json"), encoding="utf8") as f:
             data = json.load(f)
-        if role_titles:
+        if several_roles:
             commands.append(data["title"])
         commands += data["commands"]
     response = ""
     for block in commands:
         if isinstance(block, str):
-            response += f"<strong>{block}</strong>\n\n"
+            bot.send_message(message.chat.id, response)
+            response = f"<strong>{block}</strong>\n\n"
             continue
         for command_description in block:
             command, description = tuple(command_description)
