@@ -404,7 +404,9 @@ def olymp_start(message: Message):
     senior_blocks = 0
     fileless_blocks = 0
     for pb in problem_blocks:
-        if pb.block_type and not pb.path:
+        if not pb.block_type:
+            continue
+        if not pb.path:
             fileless_blocks += 1
         if pb.block_type.is_junior:
             junior_blocks += 1
