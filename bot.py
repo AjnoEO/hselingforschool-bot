@@ -407,7 +407,12 @@ def start_olymp():
     examiners = current_olymp.get_examiners()
     for e in examiners:
         if e.tg_id:
-            bot.send_message(e.tg_id, "Олимпиада началась! Напиши /free и ожидай участников\nСписок команд: /help")
+            bot.delete_state(e.tg_id, e.tg_id, bot_id = bot.bot_id)
+            bot.send_message(
+                e.tg_id, 
+                "Олимпиада началась! Напиши /free и ожидай участников\nСписок команд: /help",
+                reply_markup=ReplyKeyboardRemove(),
+            )
     bot.send_message(OWNER_ID, f"Олимпиада <em>{current_olymp.name}</em> начата")
 
 
