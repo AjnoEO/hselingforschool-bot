@@ -640,7 +640,7 @@ def add_member(message: Message, min_args: int, max_args: int, no_arg_error: str
 
 
 @bot.message_handler(commands=['add_participant', 'add_examiner'], roles=['owner'])
-def add_participant(message: Message):
+def add_member_command(message: Message):
     command = extract_command(message.text)
     if command == 'add_participant':
         add_member(
@@ -1002,6 +1002,7 @@ def update_queue_entry_status(message: Message):
         participant: Participant = Participant.from_id(queue_entry.participant_id)
         bot.copy_message(participant.tg_id, message_to_send.chat.id, message_to_send.id)
     announce_queue_entry(queue_entry)
+    bot.send_message(message.chat.id, "Запись обновлена")
 
 
 @bot.message_handler(
@@ -1064,6 +1065,7 @@ def update_queue_entry_problem(message: Message):
         new_examiner: Examiner = Examiner.from_id(new_examiner_id)
         new_examiner.assign_to_queue_entry(queue_entry)
     announce_queue_entry(queue_entry)
+    bot.send_message(message.chat.id, "Запись обновлена")
 
 
 @bot.message_handler(commands=['problem_create'], roles=['owner'])
@@ -1489,6 +1491,7 @@ def withdraw_examiner(message: Message):
                          f"Когда вернёшься, используй команду /free, чтобы продолжить принимать задачи")
     bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
     return_participant_to_queue(participant)
+    bot.send_message(message.chat.id, f"Принимающий {examiner.name} {examiner.surname} снят с приёма задачи")
 
 
 @bot.callback_query_handler(
