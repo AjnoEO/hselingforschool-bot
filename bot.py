@@ -596,13 +596,13 @@ def upload_members(message: Message, required_key: str, key_description: str, me
         response += f"\nУ {updated_amount} {decline(updated_amount, term_stem, term_endings_gen)} обновилась информация:"
         for old_user, member in updated_users:
             if isinstance(old_user, member_class):
-                response += (f"\n- {old_user.name} {old_user.surname}, "
+                response += (f"\n- {old_user.full_name}, "
                              f"{key_description.format(old_user._additional_values[required_key])} "
-                             f"→ {member.name} {member.surname}, "
+                             f"→ {member.full_name}, "
                              f"{key_description.format(member._additional_values[required_key])} "
                              f"({member.display_tg_handle()})")
             else:
-                response += f"\n- {old_user.name} {old_user.surname} → {member.name} {member.surname} ({member.display_tg_handle()})"
+                response += f"\n- {old_user.full_name} → {member.full_name} ({member.display_tg_handle()})"
     response += (f"\nЧтобы просмотреть список {term_stem}{term_endings_gen[2]}, "
                  f"используй команду /list_{member_class.__name__.lower()}s")
     bot.send_message(message.chat.id, response)
@@ -636,7 +636,7 @@ def add_member(message: Message, min_args: int, max_args: int, no_arg_error: str
         tg_handle, name, surname, olymp_id=current_olymp.id,
         **other_args, ok_if_user_exists=True
     )
-    bot.send_message(message.chat.id, f"{member.name} {member.surname} добавлен(-а) в список {term_pl_gen}")
+    bot.send_message(message.chat.id, f"{member} добавлен(-а) в список {term_pl_gen}")
 
 
 @bot.message_handler(commands=['add_participant', 'add_examiner'], roles=['owner'])
@@ -698,7 +698,7 @@ def edit_member(
     old_value = other_args[key][1](member)
     other_args[key][2](member, value)
     change = f"{other_args[key][0]}: {old_value} → {value}"
-    bot.send_message(message.chat.id, f"Данные участника {member.name} {member.surname} обновлены:\n" + change)
+    bot.send_message(message.chat.id, f"Данные участника {member} обновлены:\n" + change)
     if member.tg_id:
         bot.send_message(
             member.tg_id,
@@ -757,7 +757,7 @@ def set_examiner_problems(message: Message):
         examiner_response += f"- {Problem.from_id(problem_id)}\n"
     if examiner.tg_id:
         bot.send_message(examiner.tg_id, examiner_response)
-    bot.send_message(message.chat.id, f"Список задач принимающего {examiner.name} {examiner.surname} обновлён")
+    bot.send_message(message.chat.id, f"Список задач принимающего {examiner} обновлён")
     queue_entry = examiner.queue_entry
     if queue_entry and queue_entry.problem_id not in examiner.problems:
         participant: Participant = Participant.from_id(queue_entry.participant_id)
@@ -766,7 +766,7 @@ def set_examiner_problems(message: Message):
         bot.send_message(
             examiner.tg_id,
             f"Ты больше не можешь принимать задачу {problem}. "
-            f"Бот снял тебя с приёма задачи у участника {participant.name} {participant.surname}\n"
+            f"Бот снял тебя с приёма задачи у участника {participant.full_name}\n"
             f"❗️ Бот установил тебе статус \"занят(-а)\". Пожалуйста, используй команду /free, чтобы продолжить принимать задачи!",
             reply_markup=ReplyKeyboardRemove()
         )
@@ -860,8 +860,7 @@ def list_members_page(message: Message, member_class: type[OlympMember], page: i
         buttons[f'{page+1} →'] = {'callback_data': f'page_list_{member_class_name}_{page+1}'}
     member_list = get_func((page-1)*MEMBER_PAGE_SIZE, MEMBER_PAGE_SIZE)
     for member in member_list:
-        text += (f"\n- {member.name} {member.surname} "
-                 f"({member.display_tg_handle()})")
+        text += f"\n- {member}"
     text += f"\nЧтобы просмотреть подробную информацию о ком-то одном, используй команду <code>/view_{member_class_name}</code>"
     bot.edit_message_text(text, message.chat.id, message.id, reply_markup=quick_markup(buttons))
 
@@ -967,9 +966,9 @@ def last_queue_entries(message: Message):
         examiner: Examiner | None = chosen_examiner or (Examiner.from_id(queue_entry.examiner_id) if queue_entry.examiner_id else None)
         problem: Problem = chosen_problem or Problem.from_id(queue_entry.problem_id)
         response += (f"ЗАПИСЬ <code>{queue_entry.id}</code>\n"
-                     f"- <strong>Участник:</strong> {participant.name} {participant.surname} ({participant.grade} класс)\n")
+                     f"- <strong>Участник:</strong> {participant} ({participant.grade} класс)\n")
         if examiner: 
-            response += f"- <strong>Принимающий:</strong> {examiner.name} {examiner.surname}\n"
+            response += f"- <strong>Принимающий:</strong> {examiner}\n"
         else: response += "- <strong>Принимающий</strong> не назначен\n"
         response += (f"- <strong>Задача:</strong> <code>{problem.id}</code> {problem}\n"
                      f"- <strong>Статус:</strong> {queue_entry.status}\n")
@@ -1025,11 +1024,11 @@ def update_queue_entry_problem(message: Message):
     participant: Participant = Participant.from_id(queue_entry.participant_id)
     if not participant.has_problem(problem):
         raise UserError(
-            f"У участника {participant.name} {participant.surname} нет задачи <code>{problem_id}</code> {problem}"
+            f"У участника {participant} нет задачи <code>{problem_id}</code> {problem}"
         )
     if participant.attempts_left(problem) <= 0 or participant.solved(problem):
         raise UserError(
-            f"Участник {participant.name} {participant.surname} больше не может "
+            f"Участник {participant} больше не может "
             f"сдавать задачу <code>{problem_id}</code> {problem}"
         )
     queue_entry.problem_id = problem_id
@@ -1042,13 +1041,13 @@ def update_queue_entry_problem(message: Message):
         if problem_id in examiner.problems:
             bot.send_message(
                 examiner.tg_id,
-                f"Участнику {participant.name} {participant.surname} сменили задачу на {problem}. Обсуждайте её!"
+                f"Участнику {participant.full_name} сменили задачу на {problem}. Обсуждайте её!"
             )
             problem_number = participant.get_problem_number(problem)
             bot.send_message(
                 participant.tg_id,
                 f"Задачу {problem_number}: {problem} у тебя примет тот же принимающий, "
-                f"{examiner.name} {examiner.surname}, по ссылке {examiner.conference_link}"
+                f"{examiner.full_name}, по ссылке {examiner.conference_link}"
             )
             return
         queue_entry.status = QueueStatus.WAITING
@@ -1056,7 +1055,7 @@ def update_queue_entry_problem(message: Message):
         examiner.is_busy = True
         bot.send_message(
             examiner.tg_id,
-            f"Участнику {participant.name} {participant.surname} сменили задачу на задачу, которую ты не принимаешь\n"
+            f"Участнику {participant.full_name} сменили задачу на задачу, которую ты не принимаешь\n"
             f"❗️ Бот установил тебе статус \"занят(-а)\". Пожалуйста, используй команду /free, чтобы продолжить принимать задачи!",
             reply_markup=ReplyKeyboardRemove()
         )
@@ -1417,22 +1416,31 @@ def announce_queue_entry(queue_entry: QueueEntry):
                 participant_response += (f". У тебя {decline(attempts, 'остал', ('ась', 'ось', 'ось'))} "
                                         f"{attempts} {decline(attempts, 'попыт', ('ка', 'ки', 'ок'))}, "
                                         f"чтобы её сдать")
-            examiner_response = (f"Задача {problem} отмечена как несданная участником {participant.name} {participant.surname}")
+            examiner_response = (f"Задача {problem} отмечена как несданная участником {participant.full_name}")
         elif queue_entry.status == QueueStatus.CANCELED:
             participant_response = (f"Сдача задачи {problem_number}: {problem} отменена. Ты больше не в очереди")
             if current_olymp.status == OlympStatus.CONTEST:
                 participant_response += ". Попытка не потрачена"
-            examiner_response = (f"Сдача задачи {problem} участником {participant.name} {participant.surname} отменена")
+            examiner_response = (f"Сдача задачи {problem} участником {participant.full_name} отменена")
         elif queue_entry.status == QueueStatus.SUCCESS:
             participant_response = f"Задача {problem_number}: {problem} принята! Поздравляем"
             if current_olymp.status == OlympStatus.CONTEST and participant.should_get_new_problem(problem):
                 new_problem_block = participant.give_next_problem_block()
                 participant_response += (f"\nЗа решение этой задачи тебе полагается {participant.last_block_number} блок задач. "
                                          f"Теперь можешь сдавать и их!")
-            examiner_response = (f"Задача {problem} отмечена "
-                                 f"как успешно сданная участником {participant.name} {participant.surname}")
+            examiner_response = (f"Задача {problem} отмечена как успешно сданная участником {participant.full_name}")
         if current_olymp.status == OlympStatus.CONTEST:
-            if PROMOTE_COMMANDS:
+            can_continue = (participant.last_block_number != 3)
+            if not can_continue:
+                for _, success, attempts in participant.results()[1]:
+                    if not success and (attempts > 0):
+                        can_continue = True
+                        break
+            if not can_continue:
+                participant_response += ("\n✅ У тебя не осталось задач, которые можно сдавать! Так что "
+                                         "для тебя олимпиада завершена, можешь отправляться на заслуженный отдых")
+                bot.send_message(OWNER_ID, f"Участник {participant} завершил олимпиаду!")
+            elif PROMOTE_COMMANDS:
                 participant_response += ("\nЧтобы записаться на сдачу задачи, используй команду <code>"
                                          + escape_html("/queue <номер задачи>")
                                          + "</code>")
@@ -1459,7 +1467,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
     
     # Принимающий только что назначен
     participant_response = (f"Задачу {problem_number}: {problem} "
-                            f"у тебя примет {examiner.name} {examiner.surname}.\n"
+                            f"у тебя примет {examiner.full_name}.\n"
                             f"Ссылка: {examiner.conference_link}")
     bot.send_message(
         participant.tg_id, 
@@ -1468,7 +1476,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
                       if NO_EXAMINER_COMPLAINTS else ReplyKeyboardRemove())
     )
     examiner_response = (f"К тебе идёт сдавать задачу {problem} "
-                         f"участник {participant.name} {participant.surname} ({participant.grade} класс). "
+                         f"участник {participant.full_name} ({participant.grade} класс). "
                          f"Ты можешь принять или отклонить решение, а также отменить сдачу (например, если участник "
                          f"не пришёл или если ты не хочешь учитывать эту сдачу как потраченную попытку)")
     if current_olymp.status == OlympStatus.QUEUE:
@@ -1485,13 +1493,13 @@ def withdraw_examiner(message: Message):
     examiner: Examiner = Examiner.from_tg_handle(examiner_tg_handle, current_olymp.id)
     participant: Participant = Participant.from_id(examiner.queue_entry.participant_id)
     examiner.withdraw_from_queue_entry()
-    examiner_response = (f"{participant.name} {participant.surname} пожаловался(-лась), что тебя не было на приёме задачи. "
+    examiner_response = (f"{participant.full_name} пожаловался(-лась), что тебя не было на приёме задачи. "
                          f"Пожалуйста, используй команду /busy, если тебе надо отойти!\n"
                          f"❗️ Бот установил тебе статус \"занят(-а)\". "
                          f"Когда вернёшься, используй команду /free, чтобы продолжить принимать задачи")
     bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
     return_participant_to_queue(participant)
-    bot.send_message(message.chat.id, f"Принимающий {examiner.name} {examiner.surname} снят с приёма задачи")
+    bot.send_message(message.chat.id, f"Принимающий {examiner} снят с приёма задачи")
 
 
 @bot.callback_query_handler(
@@ -1525,14 +1533,13 @@ def examiner_didnt_come_handler(callback_query: CallbackQuery):
     bot.edit_message_reply_markup(message.chat.id, message.id, reply_markup=None)
     examiner: Examiner = Examiner.from_id(participant.queue_entry.examiner_id)
     examiner.withdraw_from_queue_entry()
-    examiner_response = (f"{participant.name} {participant.surname} отметил(-а), что тебя не было на приёме задачи. "
+    examiner_response = (f"{participant.full_name} отметил(-а), что тебя не было на приёме задачи. "
                          f"Пожалуйста, используй команду /busy, если тебе надо отойти!\n"
                          f"❗️ Бот установил тебе статус \"занят(-а)\". "
                          f"Когда вернёшься, используй команду /free, чтобы продолжить принимать задачи")
     bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
     queue_entry = participant.queue_entry
-    owner_message = (f"{participant.name} {participant.surname} ({participant.grade} класс) пожаловался(-лась), "
-                     f"что принимающего {examiner.name} {examiner.surname} не было на приёме задачи "
+    owner_message = (f"{participant} пожаловался(-лась), что принимающего {examiner} не было на приёме задачи "
                      f"(запись в очереди: <code>{queue_entry.id}</code>)")
     bot.send_message(OWNER_ID, owner_message)
     bot.answer_callback_query(callback_query.id, "Мы сообщили организаторам о проблеме")
@@ -1693,7 +1700,7 @@ def give_problem_block(message: Message):
     arg = get_arg(message, "Необходимо указать хэндл участника")
     participant: Participant = Participant.from_tg_handle(arg, current_olymp.id)
     if participant.last_block_number != new_problem_block_number - 1:
-        raise UserError(f"Последний блок участника {participant.name} {participant.surname} — блок {participant.last_block_number}")
+        raise UserError(f"Последний блок участника {participant} — блок {participant.last_block_number}")
     problem_block = participant.give_next_problem_block()
     participant_reply = (f"Тебе выдан {'второй' if participant.last_block_number == 2 else 'завершающий третий'} блок задач. "
                          f"Теперь можешь решать и сдавать их тоже!")
@@ -1708,7 +1715,7 @@ def give_problem_block(message: Message):
     )
     bot.send_message(
         message.chat.id,
-        f"{'Второй' if new_problem_block_number == 2 else 'Третий'} блок задач выдан участнику {participant.name} {participant.surname}"
+        f"{'Второй' if new_problem_block_number == 2 else 'Третий'} блок задач выдан участнику {participant}"
     )
 
 
@@ -1725,11 +1732,11 @@ def send_command(message: Message):
     member_class_name = "Участник" if command == 'send_to_participant' else "Принимающий"
     member: Participant | Examiner = member_class.from_tg_handle(tg_handle, current_olymp.id)
     if not member.tg_id:
-        raise UserError(f"{member.name} {member.surname} не авторизован(-а). Невозможно переслать сообщение…")
+        raise UserError(f"{member} не авторизован(-а). Невозможно переслать сообщение…")
     bot.copy_message(member.tg_id, message_to_send.chat.id, message_to_send.id)
     bot.send_message(
         message.chat.id,
-        f"{member_class_name} {member.name} {member.surname} получил оповещение!",
+        f"{member_class_name} {member} получил оповещение!",
         reply_to_message_id=message_to_send.id
     )
 

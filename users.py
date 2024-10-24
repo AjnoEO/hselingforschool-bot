@@ -166,6 +166,11 @@ class User:
     def __set(self, column: str, value):
         update_in_table("users", column, value, "user_id", self.__user_id)
 
+    
+    def __str__(self):
+        return f"{self.full_name} ({self.display_tg_handle()})"
+
+
     @property
     def user_id(self): return self.__user_id
     @property
@@ -193,6 +198,8 @@ class User:
     def surname(self, value: int):
         self.__set('surname', value)
         self.__surname = value
+    @property
+    def full_name(self): return f"{self.name} {self.surname}"
 
 
 class OlympMember(User):
