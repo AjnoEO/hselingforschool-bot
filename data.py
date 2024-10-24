@@ -15,5 +15,5 @@ TOKEN = __data["token"]
 OWNER_ID = int(__data["owner_id"])
 OWNER_HANDLE = __data["owner_handle"]
 
-__PREDEFINED_PATH = "predefined_files"
-BUTTONS_IMG = os.path.join(__PREDEFINED_PATH, "buttons.png")
+PREDEFINED_PATH = "predefined_files"
+BUTTONS_IMG = os.path.join(PREDEFINED_PATH, "buttons.png")

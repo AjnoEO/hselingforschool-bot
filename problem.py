@@ -1,6 +1,7 @@
 import os
 from enums import BlockType
 import sqlite3
+from data import PREDEFINED_PATH
 from db import DATABASE
 from utils import UserError, update_in_table, provide_cursor
 from telebot.formatting import escape_html
@@ -100,6 +101,8 @@ class Problem:
     def __eq__(self, other): return isinstance(other, self.__class__) and self.id == other.id
 
 class ProblemBlock:
+    DEFAULT_PATH = os.path.join(PREDEFINED_PATH, "default_problem_block.pdf")
+
     def __init__(
         self,
         id: int,
@@ -183,7 +186,7 @@ class ProblemBlock:
         cursor.connection.commit()
         created_id = cursor.lastrowid
         return cls(created_id, olymp_id, problems, block_type, path)
-    
+
 
     def delete_file(self, no_error: bool = False):
         if not self.path:

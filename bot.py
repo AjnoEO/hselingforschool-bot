@@ -150,10 +150,9 @@ def participant_keyboard_choose_problem(participant: Participant):
     return quick_markup(buttons, row_width=3)
 
 
-OLYMP_START_HELP = (f"Чтобы сдать задачу, используй кнопку «Сдать задачу» "
-                    f"(она может быть скрыта справа от поля ввода сообщения "
-                    f"под кнопкой в виде четырёх квадратиков или четырёхлистника)\n"
-                    f"Если у тебя возникли вопросы, обращайся к {OWNER_HANDLE}")
+BUTTON_HELP = ("Чтобы сдать задачу, используй кнопку «Сдать задачу» "
+               "(она может быть скрыта справа от поля ввода сообщения "
+               "под кнопкой в виде четырёх квадратиков или четырёхлистника)")
 
 
 @bot.message_handler(
@@ -240,7 +239,7 @@ def send_authentication_confirmation(member: OlympMember, *, already_authenticat
                 + ("участник" if isinstance(member, Participant) else "принимающий")
                 + "!\n" + member.display_data())
     if isinstance(member, Examiner):
-        if not current_olymp.status == OlympStatus.CONTEST:
+        if current_olymp.status != OlympStatus.CONTEST:
             response += "\nЧтобы выбрать задачи для приёма, используй команду /choose_problems"
         elif member.is_busy:
             response += "\n❗️ Чтобы начать принимать задачи, используй команду /free"
@@ -251,17 +250,17 @@ def send_authentication_confirmation(member: OlympMember, *, already_authenticat
                      "и в <a href=\"t.me/hselingforschool\">нашем Телеграм-канале</a>\n"
                      "Когда олимпиада начнётся, бот пришлёт тебе задания и ты сможешь записываться на сдачу задач через него")
     else:
-        response += ("\n❗️ Олимпиада уже началась!\n" + OLYMP_START_HELP)
+        response += "\n❗️ Олимпиада уже началась!"
+    bot.send_message(member.tg_id, response)
+    if current_olymp.status == OlympStatus.CONTEST and isinstance(member, Participant):
         bot.send_photo(
             member.tg_id,
             photo=InputFile(BUTTONS_IMG, "Где_кнопки.png"),
-            caption=response,
+            caption=BUTTON_HELP,
             reply_markup=participant_keyboard,
             show_caption_above_media=True
         )
         send_all_problem_blocks(member)
-        return
-    bot.send_message(member.tg_id, response)
 
 
 def send_all_problem_blocks(participant: Participant):
@@ -269,7 +268,7 @@ def send_all_problem_blocks(participant: Participant):
         problem_block = participant.problem_block_from_number(problem_block_number)
         bot.send_document(
             participant.tg_id,
-            InputFile(problem_block.path, f"Блок_{problem_block_number}.pdf")
+            InputFile(problem_block.path or ProblemBlock.DEFAULT_PATH, f"Блок_{problem_block_number}.pdf")
         )
 
 
@@ -388,20 +387,22 @@ def start_olymp():
         raise UserError("Олимпиада уже идёт или завершилась")
     current_olymp.status = OlympStatus.CONTEST
     participants = current_olymp.get_participants()
-    participant_message = ("Олимпиада началась! Можешь приступать к решению задач\n"
-                           + OLYMP_START_HELP)
+    participant_message = (f"Олимпиада началась! Можешь приступать к решению задач\n"
+                           f"Если у тебя возникли вопросы, обращайся к {OWNER_HANDLE}")
     for p in participants:
         if p.tg_id:
             problem_block = p.last_block
+            bot.send_document(
+                p.tg_id,
+                document=InputFile(problem_block.path or ProblemBlock.DEFAULT_PATH, "Блок_1.pdf"),
+                caption=participant_message
+            )
             bot.send_photo(
                 p.tg_id,
                 photo=InputFile(BUTTONS_IMG, "Где_кнопки.png"),
-                caption=participant_message,
-                reply_markup=participant_keyboard
-            )
-            bot.send_document(
-                p.tg_id,
-                document=InputFile(problem_block.path, "Блок_1.pdf")
+                caption=BUTTON_HELP,
+                reply_markup=participant_keyboard,
+                show_caption_above_media=True
             )
     examiners = current_olymp.get_examiners()
     for e in examiners:
@@ -1438,7 +1439,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
         if new_problem_block:
             bot.send_document(
                 participant.tg_id, 
-                document=InputFile(new_problem_block.path, f"Блок_{participant.last_block_number}.pdf"),
+                document=InputFile(new_problem_block.path or ProblemBlock.DEFAULT_PATH, f"Блок_{participant.last_block_number}.pdf"),
                 caption=participant_response,
                 reply_markup=keyboard
             )
@@ -1667,7 +1668,7 @@ def give_out_problem_block(message: Message):
                                           + "</code>")
                 bot.send_document(
                     p.tg_id,
-                    InputFile(new_problem_block.path, f"Блок_{last_block_number + 1}.pdf"),
+                    InputFile(new_problem_block.path or ProblemBlock.DEFAULT_PATH, f"Блок_{last_block_number + 1}.pdf"),
                     caption=participant_reply
                 )
     owner_reply = (f"{'Второй' if new_problem_block_number == 2 else 'Третий'} блок задач выдан "
@@ -1694,7 +1695,7 @@ def give_problem_block(message: Message):
                               + "</code>")
     bot.send_document(
         participant.tg_id,
-        InputFile(problem_block.path, f"Блок_{participant.last_block_number}.pdf"),
+        InputFile(problem_block.path or ProblemBlock.DEFAULT_PATH, f"Блок_{participant.last_block_number}.pdf"),
         caption=participant_reply
     )
     bot.send_message(
