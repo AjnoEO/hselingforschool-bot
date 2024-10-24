@@ -150,6 +150,12 @@ def participant_keyboard_choose_problem(participant: Participant):
     return quick_markup(buttons, row_width=3)
 
 
+OLYMP_START_HELP = (f"Чтобы сдать задачу, используй кнопку «Сдать задачу» "
+                    f"(она может быть скрыта справа от поля ввода сообщения "
+                    f"под кнопкой в виде четырёх квадратиков или четырёхлистника)\n"
+                    f"Если у тебя возникли вопросы, обращайся к {OWNER_HANDLE}")
+
+
 @bot.message_handler(
     commands=['start', 'help', 'authenticate'],
     roles=['not owner'],
@@ -233,6 +239,7 @@ def send_authentication_confirmation(member: OlympMember, *, already_authenticat
     response = (("Ты уже авторизован(-а) как " if already_authenticated else "Ты успешно авторизовался(-лась) как ")
                 + ("участник" if isinstance(member, Participant) else "принимающий")
                 + "!\n" + member.display_data())
+    participant_reply_markup = None
     if isinstance(member, Examiner):
         if not current_olymp.status == OlympStatus.CONTEST:
             response += "\nЧтобы выбрать задачи для приёма, используй команду /choose_problems"
@@ -244,7 +251,10 @@ def send_authentication_confirmation(member: OlympMember, *, already_authenticat
         response += ("\n\nДата и время начала олимпиады есть в <a href=\"vk.com/hseling.for.school\">нашей группе ВКонтакте</a> "
                      "и в <a href=\"t.me/hselingforschool\">нашем Телеграм-канале</a>\n"
                      "Когда олимпиада начнётся, бот пришлёт тебе задания и ты сможешь записываться на сдачу задач через него")
-    bot.send_message(member.tg_id, response)
+    else:
+        response += ("\n❗️ Олимпиада уже началась!\n" + OLYMP_START_HELP)
+        participant_reply_markup = participant_keyboard
+    bot.send_message(member.tg_id, response, reply_markup=participant_reply_markup)
     if current_olymp.status == OlympStatus.CONTEST and isinstance(member, Participant):
         send_all_problem_blocks(member)
 
@@ -373,8 +383,8 @@ def start_olymp():
         raise UserError("Олимпиада уже идёт или завершилась")
     current_olymp.status = OlympStatus.CONTEST
     participants = current_olymp.get_participants()
-    participant_message = (f"Олимпиада началась! Можешь приступать к решению задач\n"
-                           f"Если у тебя возникли вопросы, обращайся к {OWNER_HANDLE}")
+    participant_message = ("Олимпиада началась! Можешь приступать к решению задач\n"
+                           + OLYMP_START_HELP)
     for p in participants:
         if p.tg_id:
             problem_block = p.last_block
