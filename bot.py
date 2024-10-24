@@ -4,7 +4,7 @@ import re
 from typing import Callable
 import json
 from db import create_update_db, StateDBStorage
-from data import TOKEN, OWNER_ID, OWNER_HANDLE
+from data import TOKEN, OWNER_ID, OWNER_HANDLE, BUTTONS_IMG
 import telebot
 from telebot.types import Message, CallbackQuery, InputFile, ReplyKeyboardMarkup, ReplyKeyboardRemove, ReplyParameters
 from telebot.formatting import escape_html
@@ -239,7 +239,6 @@ def send_authentication_confirmation(member: OlympMember, *, already_authenticat
     response = (("Ты уже авторизован(-а) как " if already_authenticated else "Ты успешно авторизовался(-лась) как ")
                 + ("участник" if isinstance(member, Participant) else "принимающий")
                 + "!\n" + member.display_data())
-    participant_reply_markup = None
     if isinstance(member, Examiner):
         if not current_olymp.status == OlympStatus.CONTEST:
             response += "\nЧтобы выбрать задачи для приёма, используй команду /choose_problems"
@@ -253,10 +252,16 @@ def send_authentication_confirmation(member: OlympMember, *, already_authenticat
                      "Когда олимпиада начнётся, бот пришлёт тебе задания и ты сможешь записываться на сдачу задач через него")
     else:
         response += ("\n❗️ Олимпиада уже началась!\n" + OLYMP_START_HELP)
-        participant_reply_markup = participant_keyboard
-    bot.send_message(member.tg_id, response, reply_markup=participant_reply_markup)
-    if current_olymp.status == OlympStatus.CONTEST and isinstance(member, Participant):
+        bot.send_photo(
+            member.tg_id,
+            photo=InputFile(BUTTONS_IMG, "Где_кнопки.png"),
+            caption=response,
+            reply_markup=participant_keyboard,
+            show_caption_above_media=True
+        )
         send_all_problem_blocks(member)
+        return
+    bot.send_message(member.tg_id, response)
 
 
 def send_all_problem_blocks(participant: Participant):
@@ -388,11 +393,15 @@ def start_olymp():
     for p in participants:
         if p.tg_id:
             problem_block = p.last_block
-            bot.send_document(
-                p.tg_id, 
-                document=InputFile(problem_block.path, "Блок_1.pdf"),
+            bot.send_photo(
+                p.tg_id,
+                photo=InputFile(BUTTONS_IMG, "Где_кнопки.png"),
                 caption=participant_message,
                 reply_markup=participant_keyboard
+            )
+            bot.send_document(
+                p.tg_id,
+                document=InputFile(problem_block.path, "Блок_1.pdf")
             )
     examiners = current_olymp.get_examiners()
     for e in examiners:
