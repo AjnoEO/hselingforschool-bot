@@ -1107,6 +1107,18 @@ def problem_rename(message: Message):
     bot.send_message(message.chat.id, f"Задача <code>{problem.id}</code> переименована: {problem}")
 
 
+@bot.message_handler(commands=['problem_delete'], roles=['owner'])
+def problem_delete(message: Message):
+    if not current_olymp:
+        raise UserError("Нет текущей олимпиады")
+    id = get_arg(message, "Необходимо указать ID задачи")
+    problem = Problem.from_id(int(id))
+    if problem.olymp_id != current_olymp.id:
+        raise UserError("Задача не относится к текущей олимпиаде")
+    problem.delete()
+    bot.send_message(message.chat.id, f"Задача <code>{problem.id}</code> {problem} удалена")
+
+
 @bot.message_handler(commands=['problem_list'], roles=['owner', 'examiner'])
 def problem_list(message: Message):
     if not current_olymp:
@@ -1261,8 +1273,8 @@ def problem_block_update_file(message: Message):
 def problem_block_delete_file(message: Message):
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
-    if current_olymp.status == OlympStatus.CONTEST:
-        raise UserError("Нельзя удалять файлы блоков во время олимпиады")
+    if current_olymp.status in [OlympStatus.CONTEST, OlympStatus.QUEUE, OlympStatus.RESULTS]:
+        raise UserError("Нельзя удалять файлы блоков после начала олимпиады")
     arg = get_arg(message, "Необходимо указать ID или тип блока, или <code>all</code>, чтобы удалить все файлы")
     if arg != "all":
         problem_block = get_problem_block_from_arg(arg)

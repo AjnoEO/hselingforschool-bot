@@ -3,7 +3,7 @@ from enums import BlockType
 import sqlite3
 from data import PREDEFINED_PATH
 from db import DATABASE
-from utils import UserError, update_in_table, provide_cursor
+from utils import UserError, update_in_table, provide_cursor, decline
 from telebot.formatting import escape_html
 
 class Problem:
@@ -75,6 +75,15 @@ class Problem:
         )
         results = cursor.fetchall()
         return [ProblemBlock.from_columns(*fetch) for fetch in results]
+
+
+    @provide_cursor
+    def delete(self, *, cursor: sqlite3.Cursor | None = None):
+        pb_amount = len(self.get_blocks(cursor=cursor))
+        if pb_amount > 0:
+            raise UserError(f"Задача {self} входит в {pb_amount} {decline(pb_amount, 'блок', ('', 'а', 'ов'))} задач. "
+                            f"Чтобы удалить её, сначала удали или измени блоки задач")
+        cursor.execute("DELETE FROM problems WHERE id = ?", (self.id,))
 
 
     def __str__(self):
@@ -196,9 +205,11 @@ class ProblemBlock:
         os.remove(self.path)
         self.path = None
 
-    @provide_cursor
-    def delete(self, *, cursor: sqlite3.Cursor | None = None):
-        cursor.execute("DELETE FROM problem_blocks WHERE id = ?", (self.id,))
+    def delete(self):
+        with sqlite3.connect(DATABASE) as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM problem_blocks WHERE id = ?", (self.id,))
+            conn.commit()
         self.delete_file(no_error = True)
 
 
