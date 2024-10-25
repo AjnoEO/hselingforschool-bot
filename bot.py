@@ -1273,7 +1273,7 @@ def problem_block_update_file(message: Message):
 def problem_block_delete_file(message: Message):
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
-    if current_olymp.status in [OlympStatus.CONTEST, OlympStatus.QUEUE, OlympStatus.RESULTS]:
+    if current_olymp.status in [OlympStatus.CONTEST]:
         raise UserError("Нельзя удалять файлы блоков после начала олимпиады")
     arg = get_arg(message, "Необходимо указать ID или тип блока, или <code>all</code>, чтобы удалить все файлы")
     if arg != "all":
@@ -1298,6 +1298,8 @@ def problem_block_delete_file(message: Message):
 def problem_block_delete(message: Message):
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
+    if current_olymp.status in [OlympStatus.CONTEST, OlympStatus.QUEUE, OlympStatus.RESULTS]:
+        raise UserError("Нельзя удалять блоки задач после начала олимпиады")
     problem_block = get_problem_block_from_arg(message)
     problem_block.id
     response = f"Блок задач {problem_block} будет удалён безвозвратно. Ты уверен?"
