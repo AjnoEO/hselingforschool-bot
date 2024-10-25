@@ -13,6 +13,7 @@ from telebot.states import State, StatesGroup
 from telebot.states.sync.context import StateContext
 from telebot.states.sync.middleware import StateMiddleware
 from telebot.util import quick_markup, extract_command
+from telebot.apihelper import ApiTelegramException
 from olymp import Olymp, OlympStatus
 from users import User, OlympMember, Participant, Examiner
 from problem import Problem, ProblemBlock, BlockType
@@ -27,6 +28,7 @@ from io import BytesIO
 PROMOTE_COMMANDS = False # Подсказывать ли команды участникам
 NO_EXAMINER_COMPLAINTS = False # Давать ли участникам возможность пожаловаться на то, что принимающий не пришёл
 MEMBER_PAGE_SIZE = 10 # Сколько членов олимпиады показывать в одном сообщении списка
+ASK_PEOPLE_HANDLES = ['@ladnoplyashem', '@sovasofya'] # TODO: Вынести в отдельный файл
 
 
 create_update_db()
@@ -150,9 +152,9 @@ def participant_keyboard_choose_problem(participant: Participant):
     return quick_markup(buttons, row_width=3)
 
 
-BUTTON_HELP = ("Чтобы сдать задачу, используй кнопку «Сдать задачу» "
-               "(она может быть скрыта справа от поля ввода сообщения "
-               "под кнопкой в виде четырёх квадратиков или четырёхлистника)")
+BUTTON_HELP = (f"Чтобы сдать задачу, используй кнопку «{JOIN_QUEUE_BUTTON}» "
+               f"(она может быть скрыта справа от поля ввода сообщения "
+               f"под кнопкой в виде четырёх квадратиков или четырёхлистника)")
 
 
 @bot.message_handler(
@@ -388,7 +390,9 @@ def start_olymp():
     current_olymp.status = OlympStatus.CONTEST
     participants = current_olymp.get_participants()
     participant_message = (f"Олимпиада началась! Можешь приступать к решению задач\n"
-                           f"Если у тебя возникли вопросы, обращайся к {OWNER_HANDLE}")
+                           f"Если у тебя возникли вопросы, обращайся к "
+                           f"{' или '.join(ASK_PEOPLE_HANDLES)} (организационные вопросы) "
+                           f"или к {OWNER_HANDLE} (функционирование бота)")
     for p in participants:
         if p.tg_id:
             problem_block = p.last_block
@@ -1840,12 +1844,25 @@ def other_commands(message: Message):
 
 @bot.message_handler(roles=['not owner'])
 def other_messages(message: Message):
-    raise UserError(f"Неизвестная команда\n"
-                    f"Если у тебя есть организационные вопросы касательно олимпиады, "
-                    f"пиши нам в <a href=\"vk.com/hseling.for.school\">группе ВКонтакте</a> "
-                    f"и в <a href=\"t.me/hselingforschool\">Телеграм-канале</a>\n"
-                    f"Если у тебя есть вопросы по работе бота, пиши {OWNER_HANDLE}",
-                    contact_note=False)
+    if not current_olymp:
+        refer_to_people = False
+    elif current_olymp.status in [OlympStatus.REGISTRATION, OlympStatus.CONTEST]:
+        refer_to_people = True
+    elif (current_olymp.status == OlympStatus.QUEUE 
+          and (p := Participant.from_tg_id(message.from_user.id, current_olymp.id, no_error=True))
+          and p.queue_entry):
+        refer_to_people = True
+    else:
+        refer_to_people = False
+    
+    error_message = ("Неизвестная команда\n"
+                     "Если у тебя есть организационные вопросы об олимпиаде, ")
+    if refer_to_people: error_message += f"пиши {' или '.join(ASK_PEOPLE_HANDLES)}\n"
+    else:               error_message += (f"пиши нам в <a href=\"vk.com/hseling.for.school\">группе ВКонтакте</a> "
+                                          f"или в <a href=\"t.me/hselingforschool\">Телеграм-канале</a>\n")
+    error_message += f"Если у тебя есть вопросы по работе бота, пиши {OWNER_HANDLE}"
+
+    raise UserError(error_message, contact_note=False)
 
 
 print("Запускаю бота...")
@@ -1856,6 +1873,9 @@ if not current_olymp:
         "\nТекущая олимпиада не выбрана. Чтобы установить текущую олимпиаду, используй команду <code>"
         + escape_html("/olymp_select <название>")
         + "</code>")
-bot.send_message(OWNER_ID, owner_startup_message)
+try:
+    bot.send_message(OWNER_ID, owner_startup_message)
+except ApiTelegramException as e:
+    print("! Не удалось оповестить владельца. Проверь owner_id в файле config.ini")
 
 bot.infinity_polling()
