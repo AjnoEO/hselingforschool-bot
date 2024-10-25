@@ -716,13 +716,13 @@ def edit_member_command(message: Message):
     if command == 'edit_participant':
         def grade_setter(participant: Participant, value: str): participant.grade = int(value)
         edit_member(
-            message, "edit_participant", Participant,
+            message, Participant,
             {'grade': ('Класс участия', lambda participant: participant.grade, grade_setter)}
         )
     else:
         def conference_link_setter(examiner: Examiner, value: str): examiner.conference_link = value
         edit_member(
-            message, "edit_examiner", Examiner,
+            message, Examiner,
             {'conference_link': ('Ссылка на конференцию', lambda examiner: examiner.conference_link, conference_link_setter)}
         )
 
