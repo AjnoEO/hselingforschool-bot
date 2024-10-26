@@ -586,7 +586,10 @@ def upload_members(message: Message, required_key: str, key_description: str, me
             if value != m[required_key]:
                 old_user = member
             old_members_amount += 1
-        member: OlympMember = member_class.create_as_new_user(**m, olymp_id=current_olymp.id, ok_if_user_exists=True, ok_if_exists=True)
+        member: OlympMember = member_class.create_as_new_user(
+            m['tg_handle'], m['name'], m['surname'], m[required_key], 
+            olymp_id=current_olymp.id, ok_if_user_exists=True, ok_if_exists=True
+        )
         if old_user:
             updated_users.append((old_user, member))
     amount = member_table.shape[0] - old_members_amount
