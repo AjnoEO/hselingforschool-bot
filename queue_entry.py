@@ -50,7 +50,7 @@ class QueueEntry:
                 WHERE 
                     is_busy = 0 AND problem_id = ?
                 ORDER BY
-                    busyness_level DESC 
+                    busyness_level ASC
                 LIMIT 1
                 """
             cur.execute(q, (self.problem_id,))
