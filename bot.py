@@ -1775,21 +1775,32 @@ def announce_command(message: Message):
     owner_response = ""
     p_amount = 0
     e_amount = 0
+    err_amount = 0
     if send_to_participants:
         for p in current_olymp.get_participants():
             if p.tg_id:
-                bot.copy_message(p.tg_id, announcement.chat.id, announcement.id)
-                p_amount += 1
+                try:
+                    bot.copy_message(p.tg_id, announcement.chat.id, announcement.id)
+                    p_amount += 1
+                except:
+                    err_amount += 1
         owner_response += f"{p_amount} {decline(p_amount, 'участник', ('', 'а', 'ов'))}"
     if send_to_participants and send_to_examiners:
         owner_response += " и "
     if send_to_examiners:
         for e in current_olymp.get_examiners():
             if e.tg_id:
-                bot.copy_message(e.tg_id, announcement.chat.id, announcement.id)
-                e_amount += 1
+                try:
+                    bot.copy_message(e.tg_id, announcement.chat.id, announcement.id)
+                    e_amount += 1
+                except:
+                    err_amount += 1
         owner_response += f"{e_amount} {decline(e_amount, 'принимающ', ('ий', 'их', 'их'))}"
     owner_response += " получил" + ("и" if p_amount + e_amount > 1 else "") + " оповещение!"
+    if err_amount:
+        owner_response += (
+            f"⚠️ Не удалось доставить сообщение {err_amount} {decline(err_amount, 'пользовател', ('ю', 'ям', 'ям'))}"
+        )
     bot.send_message(message.chat.id, owner_response, reply_to_message_id=announcement.id)
 
 
