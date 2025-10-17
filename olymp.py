@@ -1,6 +1,7 @@
 from enums import OlympStatus, QueueStatus
 import sqlite3
 from db import DATABASE
+from tag import Tag
 from users import Participant, Examiner
 from problem import Problem, ProblemBlock
 from queue_entry import QueueEntry
@@ -115,20 +116,76 @@ class Olymp:
         cursor.execute(f"SELECT 1 FROM {table} WHERE olymp_id = ?", (self.id,))
         return len(cursor.fetchall())
 
+    def __tag_condition(
+        self, table: str, include_tags: list[Tag] | list[int] | None = None, exclude_tags: list[Tag] | list[int] | None = None
+    ) -> tuple[str, list]:
+        """
+        :return: `query`, `params`
+        """
+        with_clauses = []
+        params = []
+        if include_tags:
+            if isinstance(include_tags[0], Tag):
+                include_tags = [tag.id for tag in include_tags]
+            with_clauses.append(
+                """
+                user_lacking_required_tags AS (
+                    SELECT user_id, 
+                        ? - COUNT(*) as count
+                    FROM user_tags
+                    WHERE tag_id IN (""" + ', '.join(['?'] * len(include_tags)) + """)
+                    GROUP BY user_id
+                )
+                """
+            )
+            params.extend([len(include_tags)] + include_tags)
+        if exclude_tags:
+            if isinstance(exclude_tags[0], Tag):
+                exclude_tags = [tag.id for tag in exclude_tags]
+            with_clauses.append(
+                """
+                user_excluded_tags AS (
+                    SELECT user_id, COUNT(*) as count
+                    FROM user_tags
+                    WHERE tag_id IN (""" + ', '.join(['?'] * len(include_tags)) + """)
+                    GROUP BY user_id
+                )
+                """
+            )
+            params.extend(exclude_tags)
+        q = "WITH " + ", ".join(with_clauses) + "\n" if with_clauses else ""
+        q += f"SELECT user_id FROM {table} "
+        if include_tags: q += "LEFT JOIN user_lacking_required_tags l USING (user_id) "
+        if exclude_tags: q += "LEFT JOIN user_excluded_tags e USING (user_id) "
+        q += "WHERE olymp_id = ?"
+        if include_tags: q += " AND l.count = 0"
+        if exclude_tags: q += " AND e.count = 0"
+        params.append(self.id)
+        return q, params
+        
+
     @provide_cursor
     def get_participants(
-        self, start: int | None = None, limit: int | None = None, *, sort: bool = False, cursor: sqlite3.Cursor | None = None
+        self, start: int | None = None, limit: int | None = None, *, 
+        sort: bool = False, finished: bool | None = None, 
+        include_tags: list[Tag] | list[int] | None = None, exclude_tags: list[Tag] | list[int] | None = None,
+        cursor: sqlite3.Cursor | None = None
     ) -> list[Participant]:
         if not limit and start:
             raise ValueError("Нельзя устанавливать начало списка участников, не устанавливая ограничение на количество")
-        q = "SELECT user_id FROM participants WHERE olymp_id = ?"
+        q, params = self.__tag_condition("participants", include_tags, exclude_tags)
+        if finished is not None:
+            q += f" AND finished = ?"
+            params.append(finished)
         if sort:
             q += " ORDER BY id ASC"
         if limit:
-            q += f" LIMIT {limit}"
+            q += f" LIMIT ?"
+            params.append(limit)
             if start:
-                q += f" OFFSET {start}"
-        cursor.execute(q, (self.id,))
+                q += f" OFFSET ?"
+                params.append(start)
+        cursor.execute(q, tuple(params))
         results = cursor.fetchall()
         return [Participant.from_user_id(user_id_tuple[0], self.id) for user_id_tuple in results]
     
@@ -138,11 +195,13 @@ class Olymp:
     @provide_cursor
     def get_examiners(
         self, start: int | None = None, limit: int | None = None, *,
-        sort: bool = False, only_free: bool = False, order_by_busyness: bool = False, cursor: sqlite3.Cursor | None = None
+        sort: bool = False, only_free: bool = False, order_by_busyness: bool = False, 
+        include_tags: list[Tag] | list[int] | None = None, exclude_tags: list[Tag] | list[int] | None = None,
+        cursor: sqlite3.Cursor | None = None
     ) -> list[Examiner]:
         if not limit and start:
             raise ValueError("Нельзя устанавливать начало списка принимающих, не устанавливая ограничение на количество")
-        q = "SELECT user_id FROM examiners WHERE olymp_id = ?"
+        q, params = self.__tag_condition("examiners", include_tags, exclude_tags)
         if only_free:
             q += " AND is_busy = 0"
         if order_by_busyness:
@@ -153,7 +212,7 @@ class Olymp:
             q += f" LIMIT {limit}"
             if start:
                 q += f" OFFSET {start}"
-        cursor.execute(q, (self.id,))
+        cursor.execute(q, tuple(params))
         results = cursor.fetchall()
         return [Examiner.from_user_id(user_id_tuple[0], self.id) for user_id_tuple in results]
     

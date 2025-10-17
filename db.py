@@ -8,7 +8,7 @@ from telebot.storage.base_storage import StateStorageBase
 __DATABASE_DIR = "database"
 __DATABASE_FILE = "olymp.db"
 DATABASE = os.path.join(__DATABASE_DIR, __DATABASE_FILE)
-DB_VERSION = 4
+DB_VERSION = 5
 DB_VERSION_FILE = os.path.join(__DATABASE_DIR, "version.txt")
 SCRIPT_FILE = os.path.join(__DATABASE_DIR, "db.sql")
 

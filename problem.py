@@ -59,7 +59,7 @@ class Problem:
             if pr.name == name:
                 if no_error:
                     return pr
-                raise UserError(f"Название {pr} уже занято задачей <code>{pr.id}</code>")
+                raise UserError(f"Название <em>{escape_html(pr)}</em> уже занято задачей <code>{pr.id}</code>")
         values = (olymp_id, name)
         cursor.execute("INSERT INTO problems(olymp_id, name) VALUES (?, ?)", values)
         cursor.connection.commit()

@@ -1,6 +1,7 @@
 import sqlite3
 from db import DATABASE
 from utils import UserError, decline, provide_cursor, value_exists, update_in_table
+from tag import Tag
 from enums import OlympStatus
 from queue_entry import QueueEntry, QueueStatus
 from problem import Problem, ProblemBlock, BlockType
@@ -15,13 +16,15 @@ class User:
         tg_id: int | None,
         tg_handle: str,
         name: str,
-        surname: str
+        surname: str,
+        tags: list[int],
     ):
         self.__user_id: int = user_id
         self.__tg_id: int | None = tg_id
         self.__tg_handle: str = self.conform_tg_handle(tg_handle)
         self.__name: str = name
         self.__surname: str = surname
+        self.__tags: list[int] = tags
 
     @classmethod
     @provide_cursor
@@ -32,6 +35,7 @@ class User:
         surname: str,
         *,
         tg_id: int | None = None,
+        tags: list[int] | None = None,
         ok_if_exists: bool = False,
         cursor: sqlite3.Cursor | None = None,
     ):
@@ -56,6 +60,13 @@ class User:
                 "UPDATE users SET tg_id = ?, name = ?, surname = ? WHERE tg_handle = ?",
                 (tg_id, name, surname, tg_handle)
             )
+        user_id = cursor.lastrowid
+        if tags and len(tags) > 0:
+            q = "INSERT INTO user_tags(user_id, tag_id) VALUES " + ", ".join(["(?, ?)"] * len(tags))
+            t = []
+            for tag_id in tags:
+                t += [user_id, tag_id]
+            cursor.execute(q, tuple(t))
         cursor.connection.commit()
         return cls.from_tg_handle(tg_handle)
 
@@ -103,11 +114,16 @@ class User:
                 """
             cur.execute(q, (given_value,))
             fetched_base_values = list(cur.fetchone())
-        user = cls(*fetched_base_values)
+        user = cls(*fetched_base_values, tags=[])
         if ((tg_id and user.tg_id != tg_id)
             or (user_id and user.user_id != user_id)
             or (tg_handle and user.tg_handle != tg_handle)):
             raise ValueError(error_ids_dont_match)
+        with sqlite3.connect(DATABASE) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT tag_id FROM user_tags WHERE user_id = ?", (user.__user_id,))
+            result = cur.fetchall()
+        user.__tags = [fetch[0] for fetch in result]
         return user
 
     @classmethod
@@ -148,6 +164,7 @@ class User:
         new_name = new_user.name
         new_surname = new_user.surname
         new_tg_handle = new_user.tg_handle
+        new_tags = new_user.tags
         with sqlite3.connect(DATABASE) as conn:
             cur = conn.cursor()
             cur.execute("UPDATE participants SET user_id = ? WHERE user_id = ?", (self.user_id, new_user.user_id))
@@ -157,10 +174,71 @@ class User:
         self.name = new_name
         self.surname = new_surname
         self.tg_handle = new_tg_handle
+        self.set_tags(new_tags)
     
 
     def display_tg_handle(self, hide_id: bool = False) -> str:
         return (f"Без хэндла" if hide_id else f"ID: <code>{self.tg_handle}</code>") if self.tg_handle.isnumeric() else f"@{self.tg_handle}"
+    
+    def display_tags(self, verbose: bool = False, hide_name: bool = True) -> str:
+        result = ""
+        if verbose:
+            amount = len(self.tags)
+            if amount == 0:
+                return "Тэгов нет"
+            result = f"{amount} {decline(amount, 'тэг', ('', 'а', 'ов'))}:\n"
+        tag_list = []
+        for tag_id in self.tags:
+            tag = Tag.from_id(tag_id)
+            if not hide_name:
+                tag_list.append(f"<code>{escape_html(tag.name)}</code>: {tag}")
+            else:
+                tag_list.append(str(tag))
+        return result + "\n".join(tag_list)
+
+    def add_tag(self, tag: Tag | int):
+        if isinstance(tag, Tag):
+            tag = tag.id
+        if tag in self.tags:
+            raise ValueError(f"У пользователя {self.user_id} уже есть тэг {tag}")
+        with sqlite3.connect(DATABASE) as conn:
+            cur = conn.cursor()
+            cur.execute("INSERT INTO user_tags(user_id, tag_id) VALUES (?, ?)", (self.user_id, tag))
+            conn.commit()
+        self.__tags.append(tag)
+
+    def remove_tag(self, tag: Tag | int):
+        if isinstance(tag, Tag):
+            tag = tag.id
+        if tag not in self.tags:
+            raise ValueError(f"У пользователя {self.user_id} уже нет тэга {tag}")
+        with sqlite3.connect(DATABASE) as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM user_tags WHERE user_id = ? AND tag_id = ?", (self.user_id, tag))
+            conn.commit()
+        self.__tags.remove(tag)
+
+    def set_tags(self, tags: list[Tag] | list[int] | None):
+        if tags is None:
+            tags = []
+        elif tags and isinstance(tags[0], Tag):
+            tags = [tag.id for tag in tags]
+        remove = []
+        add = []
+        for tag in self.tags:
+            if tag not in tags:
+                remove.append(tag)
+        for tag in tags:
+            if tag not in self.tags:
+                add.append(tag)
+        with sqlite3.connect(DATABASE) as conn:
+            cur = conn.cursor()
+            for tag in remove:
+                cur.execute("DELETE FROM user_tags WHERE user_id = ? AND tag_id = ?", (self.user_id, tag))
+            for tag in add:
+                cur.execute("INSERT INTO user_tags(user_id, tag_id) VALUES (?, ?)", (self.user_id, tag))
+            conn.commit()
+        self.__tags = tags
 
 
     def __set(self, column: str, value):
@@ -200,6 +278,8 @@ class User:
         self.__surname = value
     @property
     def full_name(self): return f"{self.name} {self.surname}"
+    @property
+    def tags(self): return self.__tags
 
 
 class OlympMember(User):
@@ -211,9 +291,10 @@ class OlympMember(User):
         tg_handle: int,
         name: str,
         surname: str,
+        tags: list[int],
         **additional_values
     ):
-        super().__init__(user_id, tg_id, tg_handle, name, surname)
+        super().__init__(user_id, tg_id, tg_handle, name, surname, tags)
         self.__olymp_id: int = olymp_id
         self.__id: int | None = None
         self._additional_values = additional_values
@@ -262,6 +343,7 @@ class OlympMember(User):
             user.tg_handle,
             user.name,
             user.surname,
+            user.tags,
             **additional_values,
         )
 
@@ -355,14 +437,20 @@ class Participant(OlympMember):
         tg_handle: int,
         name: str,
         surname: str,
+        tags: list[int],
         grade: int,
         last_block_number: int,
+        finished: bool | int,
         id: int
     ):
-        super().__init__(olymp_id, user_id, tg_id, tg_handle, name, surname, id=id, grade=grade, last_block_number=last_block_number)
+        super().__init__(
+            olymp_id, user_id, tg_id, tg_handle, name, surname, tags,
+            id=id, grade=grade, last_block_number=last_block_number, finished=finished
+        )
         self.__id: int = id
         self.__grade: int = grade
         self.__last_block_number: int = last_block_number
+        self.__finished: bool = bool(finished)
 
     
     @classmethod
@@ -374,6 +462,7 @@ class Participant(OlympMember):
         olymp_id: int,        
         *,
         last_block_number: int | None = None,
+        finished: bool = False,
         ok_if_exists: bool = False,
         cursor: sqlite3.Cursor | None = None,
     ):
@@ -388,15 +477,15 @@ class Participant(OlympMember):
         if exists and not ok_if_exists:
             raise UserError(f"Пользователь {user_id} уже участник олимпиады {olymp_id}")
         if exists:
-            q = (f"UPDATE participants SET grade = ?"
+            q = (f"UPDATE participants SET grade = ?, finished = ?"
                  f"{', last_block_number = ?' if last_block_number else ''} "
                  f"WHERE olymp_id = ? AND user_id = ?")
-            p = [grade] + ([last_block_number] if last_block_number else []) + [olymp_id, user_id]
+            p = [grade, finished] + ([last_block_number] if last_block_number else []) + [olymp_id, user_id]
         else:
-            q = (f"INSERT INTO participants(user_id, olymp_id, grade"
+            p = [user_id, olymp_id, grade, finished] + ([last_block_number] if last_block_number else [])
+            q = (f"INSERT INTO participants(user_id, olymp_id, grade, finished"
                 f"{', last_block_number' if last_block_number else ''}) VALUES "
-                f"(?, ?, ?{', ?' if last_block_number else ''})")
-            p = [user_id, olymp_id, grade] + ([last_block_number] if last_block_number else [])
+                f"({', '.join(['?']*len(p))})")
         cursor.execute(q, tuple(p))
         cursor.connection.commit()
         return Participant.from_user_id(user_id, olymp_id)
@@ -412,7 +501,9 @@ class Participant(OlympMember):
         olymp_id: int,
         *,
         tg_id: int | None = None,
+        tags: list[int] | None = None,
         last_block_number: int | None = None,
+        finished: bool = False,
         ok_if_user_exists: bool = False,
         ok_if_exists: bool = False,
         cursor: sqlite3.Cursor | None = None,
@@ -420,9 +511,9 @@ class Participant(OlympMember):
         """
         Добавить пользователя в таблицу users и добавить его как участника в таблицу participants
         """
-        user = User.create(tg_handle, name, surname, tg_id=tg_id, ok_if_exists=ok_if_user_exists, cursor=cursor)
+        user = User.create(tg_handle, name, surname, tg_id=tg_id, tags=tags, ok_if_exists=ok_if_user_exists, cursor=cursor)
         return Participant.create_for_existing_user(
-            user, grade, olymp_id, last_block_number=last_block_number, 
+            user, grade, olymp_id, last_block_number=last_block_number, finished=finished,
             ok_if_exists=ok_if_exists, cursor=cursor
         )
     
@@ -440,7 +531,7 @@ class Participant(OlympMember):
         participant = super().from_db(
             olymp_id,
             "participants", 
-            ["id", "grade", "last_block_number"], 
+            ["id", "grade", "last_block_number", "finished"], 
             user_id = user_id, 
             tg_id = tg_id,
             tg_handle = tg_handle,
@@ -452,6 +543,7 @@ class Participant(OlympMember):
         participant.__id = participant._additional_values["id"]
         participant.__grade = participant._additional_values["grade"]
         participant.__last_block_number = participant._additional_values["last_block_number"]
+        participant.__finished = bool(participant._additional_values["finished"])
         return participant
 
     @classmethod
@@ -468,7 +560,15 @@ class Participant(OlympMember):
         response = f"{self.name} {self.surname}, {self.grade} класс"
         if technical_info:
             response += f" ({self.display_tg_handle()})"
+        display_tags = self.display_tags(verbose = verbose, hide_name = not technical_info)
+        if display_tags: response += "\n" + display_tags
+        if technical_info:
             response += f"\nАвторизация " + ("пройдена" if self.tg_id else "не пройдена")
+            response += (
+                "\nУчастие завершено"
+                if self.finished or olymp_status == OlympStatus.RESULTS else 
+                "\nУчаствует"
+            )
         if contact_note: response += f"\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLE}"
         return response
     
@@ -602,6 +702,12 @@ class Participant(OlympMember):
         self.__set('last_block_number', value)
         self.__last_block_number = value
     @property
+    def finished(self): return self.__finished
+    @finished.setter
+    def finished(self, value: bool):
+        self.__set('finished', value)
+        self.__finished = value
+    @property
     def is_junior(self): return (self.grade < 10)
     @property
     def is_senior(self): return not self.is_junior
@@ -618,13 +724,14 @@ class Examiner(OlympMember):
         tg_handle: int,
         name: str,
         surname: str,
+        tags: list[int],
         conference_link: str,
         busyness_level: int,
         is_busy: bool | int,
         id: int,
         problems: list[int] | str | None = None
     ):
-        super().__init__(olymp_id, user_id, tg_id, tg_handle, name, surname,
+        super().__init__(olymp_id, user_id, tg_id, tg_handle, name, surname, tags,
                          id=id, conference_link=conference_link, problems=problems,
                          busyness_level=busyness_level, is_busy=is_busy)
         if isinstance(problems, str):
@@ -693,6 +800,7 @@ class Examiner(OlympMember):
         olymp_id: int,
         *,
         tg_id: int | None = None,
+        tags: list[int] | None = None,
         problems: list[int] | None = None,
         busyness_level: int = 0,
         is_busy: bool = True,
@@ -703,7 +811,7 @@ class Examiner(OlympMember):
         """
         Добавить пользователя в таблицу users и добавить его как принимающего в таблицу examiners
         """
-        user = User.create(tg_handle, name, surname, tg_id=tg_id, ok_if_exists=ok_if_user_exists, cursor=cursor)
+        user = User.create(tg_handle, name, surname, tg_id=tg_id, tags=tags, ok_if_exists=ok_if_user_exists, cursor=cursor)
         return Examiner.create_for_existing_user(
             user, conference_link, olymp_id, problems=problems,
             busyness_level=busyness_level, is_busy=is_busy, ok_if_exists=ok_if_exists, cursor=cursor
@@ -767,6 +875,9 @@ class Examiner(OlympMember):
         response = f"{self.name} {self.surname}"
         if technical_info:
             response += f" ({self.display_tg_handle()})"
+        display_tags = self.display_tags(verbose = verbose, hide_name = not technical_info)
+        if display_tags: response += "\n" + display_tags
+        if technical_info:
             response += f"\nАвторизация " + ("пройдена" if self.tg_id else "не пройдена")
         response += f"\nCсылка на конференцию: {self.conference_link}"
         if verbose:

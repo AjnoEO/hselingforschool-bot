@@ -16,6 +16,7 @@ from telebot.util import quick_markup, extract_command
 from telebot.apihelper import ApiTelegramException
 from olymp import Olymp, OlympStatus
 from users import User, OlympMember, Participant, Examiner
+from tag import Tag
 from problem import Problem, ProblemBlock, BlockType
 from queue_entry import QueueEntry, QueueStatus
 from utils import UserError, decline, get_arg, get_n_args, get_file, save_downloaded_file
@@ -728,6 +729,83 @@ def edit_member_command(message: Message):
             message, Examiner,
             {'conference_link': ('Ссылка на конференцию', lambda examiner: examiner.conference_link, conference_link_setter)}
         )
+
+
+@bot.message_handler(commands=['create_tag'], roles=['owner'])
+def create_tag(message: Message):
+    name, description = get_n_args(message, 2, 2, "Необходимо указать код и описание")
+    tag = Tag.create(name, description)
+    bot.send_message(
+        message.chat.id, f"Тэг <code>{escape_html(tag.name)}</code> <em>{tag}</em> создан (<code>{tag.id}</code>)"
+    )
+
+
+@bot.message_handler(commands=['edit_tag'], roles=['owner'])
+def edit_tag(message: Message):
+    possible_keys = ['name', 'description']
+    syntax_hint = ("Синтаксис команды: <code>"
+                   + escape_html("/edit_tag <tg-хэндл> <" + "|".join(possible_keys) + "> <значение>")
+                   + "</code>")
+    tag_name, key, value = get_n_args(message, 3, 3, syntax_hint)
+    if key not in possible_keys:
+        raise UserError(syntax_hint)
+    if key == "name" and len(value.split()) > 1:
+        raise UserError("Код не должен содержать пробелов")
+    tag: Tag = Tag.from_name(tag_name)
+    if key == "name":
+        tag.name = value
+        response = f"Код тэга <code>{escape_html(tag_name)}</code> обновлён на <code>{escape_html(tag.name)}</code>"
+    elif key == "description":
+        tag.description = value
+        response = f"Описание тэга <code>{escape_html(tag.name)}</code> обновлено: <em>{tag}</em>"
+    bot.send_message(message.chat.id, response)
+
+
+@bot.message_handler(commands=['list_tags'], roles=['owner'])
+def list_tags(message: Message):
+    tags = Tag.get_all()
+    if len(tags) == 0:
+        bot.send_message(message.chat.id, "Тэгов не задано")
+        return
+    response = f"{decline(len(tags), 'Задан', ('', 'о', 'о'))} {len(tags)} {decline(len(tags), 'тэг', ('', 'а', 'ов'))}:"
+    for tag in tags:
+        response += f"\n- <code>{escape_html(tag.name)}</code> <em>{tag}</em>"
+    bot.send_message(message.chat.id, response)
+
+
+@bot.message_handler(commands=['set_tags'], roles=['owner'])
+def set_tags(message: Message):
+    tg_handle, tags = get_n_args(message, 2, 2, "Необходимо указать Телеграм-хэндл пользователя и тэги")
+    tags = tags.split()
+    current_tags = Tag.get_all()
+    current_tag_ids = set(map(lambda tag: tag.name, current_tags))
+    if not set(tags).issubset(current_tag_ids):
+        not_found = [tag for tag in tags if tag not in current_tag_ids]
+        err = (
+            f"{len(not_found)} {decline(len(not_found), 'тэг', ('', 'а', 'ов'))} "
+            f"не {decline(len(not_found), 'найден', ('', 'о', 'о'))}: "
+        )
+        err += ", ".join(not_found)
+        raise UserError(err)
+    tags = list(filter(lambda tag: tag.name in tags, current_tags))
+    user: User = User.from_tg_handle(tg_handle)
+    user.set_tags(tags)
+    user_response = "Твои тэги обновлены:\n"
+    for tag in tags:
+        user_response += f"- {tag}\n"
+    if user.tg_id:
+        bot.send_message(user.tg_id, user_response)
+    bot.send_message(message.chat.id, f"Список тэгов пользователя {user} обновлён")
+
+
+@bot.message_handler(commands=['clear_tags'], roles=['owner'])
+def clear_tags(message: Message):
+    tg_handle = get_arg(message, "Необходимо указать Телеграм-хэндл пользователя и тэги")
+    user: User = User.from_tg_handle(tg_handle)
+    user.set_tags(None)
+    if user.tg_id:
+        bot.send_message(user.tg_id, "Твои тэги удалены")
+    bot.send_message(message.chat.id, f"Тэги пользователя {user} очищены")
 
 
 def return_participant_to_queue(participant: Participant):
