@@ -10,6 +10,11 @@ CREATE TABLE IF NOT EXISTS `block_types` (
 	`id` integer primary key NOT NULL UNIQUE,
 	`name` text NOT NULL UNIQUE
 );
+CREATE TABLE IF NOT EXISTS `tags` (
+    `id` integer primary key NOT NULL UNIQUE,
+    `name` text NOT NULL UNIQUE,
+    `description` text NOT NULL
+);
 CREATE TABLE IF NOT EXISTS `olymps` (
 	`id` integer primary key NOT NULL UNIQUE,
 	`name` text NOT NULL UNIQUE,
@@ -22,6 +27,12 @@ CREATE TABLE IF NOT EXISTS `users` (
 	`tg_handle` TEXT NOT NULL UNIQUE,
 	`name` TEXT NOT NULL,
 	`surname` TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS `user_tags` (
+    `user_id` integer NOT NULL,
+    `tag_id` integer NOT NULL,
+	FOREIGN KEY(`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+	FOREIGN KEY(`tag_id`) REFERENCES `tags`(`id`) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS `problems` (
 	`id` integer primary key NOT NULL UNIQUE,
@@ -52,6 +63,7 @@ CREATE TABLE IF NOT EXISTS `participants` (
 	`user_id` INTEGER NOT NULL,
 	`grade` INTEGER NOT NULL,
 	`last_block_number` INTEGER NOT NULL DEFAULT 1 CHECK (`last_block_number` BETWEEN 1 AND 3),
+	`finished` INTEGER NOT NULL DEFAULT 0 CHECK (`finished` IN (0, 1)),
 	FOREIGN KEY(`olymp_id`) REFERENCES `olymps`(`id`),
 	FOREIGN KEY(`user_id`) REFERENCES `users`(`user_id`),
 	UNIQUE(`olymp_id`, `user_id`)
