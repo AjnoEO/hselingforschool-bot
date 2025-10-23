@@ -1622,9 +1622,10 @@ def announce_queue_entry(queue_entry: QueueEntry):
                       if NO_EXAMINER_COMPLAINTS else ReplyKeyboardRemove())
     )
     examiner_response = (f"К тебе идёт сдавать задачу {problem} "
-                         f"участник {participant.full_name} ({participant.grade} класс). "
-                         f"Ты можешь принять или отклонить решение, а также отменить сдачу (например, если участник "
-                         f"не пришёл или если ты не хочешь учитывать эту сдачу как потраченную попытку)")
+                         f"участник {participant.full_name} ({participant.grade} класс). ")
+    examiner_response += participant.display_tags()
+    examiner_response += (f"Ты можешь принять или отклонить решение, а также отменить сдачу (например, если участник "
+                          f"не пришёл или если ты не хочешь учитывать эту сдачу как потраченную попытку)")
     if current_olymp.status == OlympStatus.QUEUE or participant.finished:
         examiner_response += (f"\n\nЕсли участник случайно нажал не на ту задачу, пожалуйста, напиши {OWNER_HANDLE}! "
                               "И <strong>не нажимай ни на какую из кнопок!</strong>")
