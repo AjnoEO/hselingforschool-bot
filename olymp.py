@@ -65,12 +65,27 @@ class Olymp:
         return Olymp(*fetch[0])
     
 
-    def unhandled_queue_left(self) -> bool:
+    def unhandled_queue_left(self, finished: bool | None = None) -> bool:
         with sqlite3.connect(DATABASE) as conn:
             cur = conn.cursor()
-            q = (f"SELECT EXISTS(SELECT 1 FROM queue WHERE olymp_id = ?"
-                 f"AND status IN ({','.join(map(str, QueueStatus.active(as_numbers=True)))}))")
-            cur.execute(q, (self.id,))
+            status_list = ','.join(map(str, QueueStatus.active(as_numbers=True)))
+            if finished is None:
+                q = (f"SELECT EXISTS(SELECT 1 FROM queue WHERE olymp_id = ?"
+                    f"AND status IN ({status_list}))")
+                params = (self.id,)
+            else:
+                q = f"""
+                SELECT EXISTS(
+                    SELECT 1 
+                    FROM queue
+                        LEFT JOIN participants ON (queue.participant_id = participants.id)
+                        LEFT JOIN users USING (user_id)
+                    WHERE queue.olymp_id = ? AND finished = ?
+                        AND status IN ({status_list})
+                )
+                """
+                params = (self.id, finished)
+            cur.execute(q, params)
             result = cur.fetchone()
             return bool(result[0])
     
@@ -96,7 +111,8 @@ class Olymp:
             if problem:
                 q += " AND problem_id = ?"
                 params.append(problem)
-            q += f" ORDER BY id DESC LIMIT {limit}"
+            q += f" ORDER BY id DESC LIMIT ?"
+            params.append(limit)
             cur.execute(q, tuple(params))
             results = cur.fetchall()
             queue_entries = [QueueEntry(*fetch) for fetch in results]
@@ -112,12 +128,14 @@ class Olymp:
 
 
     @provide_cursor
-    def __amount(self, table: str, *, cursor: sqlite3.Cursor | None = None) -> int:
-        cursor.execute(f"SELECT 1 FROM {table} WHERE olymp_id = ?", (self.id,))
+    def __amount(self, table: str, conditions: list[str] = [], params: list = [], *, cursor: sqlite3.Cursor | None = None) -> int:
+        cursor.execute(f"SELECT 1 FROM {table} WHERE " + " AND ".join(["olymp_id = ?"] + conditions), tuple([self.id] + params))
         return len(cursor.fetchall())
 
     def __tag_condition(
-        self, table: str, include_tags: list[Tag] | list[int] | None = None, exclude_tags: list[Tag] | list[int] | None = None
+        self, table: str,
+        include_tags: list[Tag] | list[int] | list[str] | None = None,
+        exclude_tags: list[Tag] | list[int] | list[str] | None = None
     ) -> tuple[str, list]:
         """
         :return: `query`, `params`
@@ -125,6 +143,8 @@ class Olymp:
         with_clauses = []
         params = []
         if include_tags:
+            if isinstance(include_tags[0], str):
+                include_tags = [Tag.from_name(name) for name in include_tags]
             if isinstance(include_tags[0], Tag):
                 include_tags = [tag.id for tag in include_tags]
             with_clauses.append(
@@ -140,6 +160,8 @@ class Olymp:
             )
             params.extend([len(include_tags)] + include_tags)
         if exclude_tags:
+            if isinstance(exclude_tags[0], str):
+                exclude_tags = [Tag.from_name(name) for name in exclude_tags]
             if isinstance(exclude_tags[0], Tag):
                 exclude_tags = [tag.id for tag in exclude_tags]
             with_clauses.append(
@@ -147,7 +169,7 @@ class Olymp:
                 user_excluded_tags AS (
                     SELECT user_id, COUNT(*) as count
                     FROM user_tags
-                    WHERE tag_id IN (""" + ', '.join(['?'] * len(include_tags)) + """)
+                    WHERE tag_id IN (""" + ', '.join(['?'] * len(exclude_tags)) + """)
                     GROUP BY user_id
                 )
                 """
@@ -159,7 +181,7 @@ class Olymp:
         if exclude_tags: q += "LEFT JOIN user_excluded_tags e USING (user_id) "
         q += "WHERE olymp_id = ?"
         if include_tags: q += " AND l.count = 0"
-        if exclude_tags: q += " AND e.count = 0"
+        if exclude_tags: q += " AND COALESCE(e.count, 0) = 0"
         params.append(self.id)
         return q, params
         
@@ -168,7 +190,8 @@ class Olymp:
     def get_participants(
         self, start: int | None = None, limit: int | None = None, *, 
         sort: bool = False, finished: bool | None = None, 
-        include_tags: list[Tag] | list[int] | None = None, exclude_tags: list[Tag] | list[int] | None = None,
+        include_tags: list[Tag] | list[int] | list[str] | None = None,
+        exclude_tags: list[Tag] | list[int] | list[str] | None = None,
         cursor: sqlite3.Cursor | None = None
     ) -> list[Participant]:
         if not limit and start:
@@ -189,14 +212,18 @@ class Olymp:
         results = cursor.fetchall()
         return [Participant.from_user_id(user_id_tuple[0], self.id) for user_id_tuple in results]
     
-    def participants_amount(self) -> int:
-        return self.__amount("participants")
+    def participants_amount(self, finished: bool | None = None) -> int:
+        if finished is None:
+            return self.__amount("participants")
+        else:
+            return self.__amount("participants", ["finished = ?"], [finished])
     
     @provide_cursor
     def get_examiners(
         self, start: int | None = None, limit: int | None = None, *,
         sort: bool = False, only_free: bool = False, order_by_busyness: bool = False, 
-        include_tags: list[Tag] | list[int] | None = None, exclude_tags: list[Tag] | list[int] | None = None,
+        include_tags: list[Tag] | list[int] | list[str] | None = None,
+        exclude_tags: list[Tag] | list[int] | list[str] | None = None,
         cursor: sqlite3.Cursor | None = None
     ) -> list[Examiner]:
         if not limit and start:

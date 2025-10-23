@@ -43,6 +43,27 @@ def get_n_args(message: Message, min: int, max: int, no_arg_error: str):
     return tuple(command_arg)
 
 
+def get_tags_args(message: Message, no_arg_error: str | None = None):
+    """
+    :return include: Список обязательных тэгов
+    :return exclude: Список исключённых тэгов
+    """
+    command_arg = message.text.split()
+    if len(command_arg) == 1:
+        if no_arg_error is None: return None, None
+        else: raise UserError(no_arg_error)
+    include = []
+    exclude = []
+    for arg in command_arg[1:]:
+        if not arg.startswith(("+", "-")):
+            raise UserError("Все тэги должны быть указаны со знаком + либо -")
+        if arg.startswith("+"):
+            include.append(arg[1:])
+        else:
+            exclude.append(arg[1:])
+    return include, exclude
+
+
 def get_file(message: Message, bot: TeleBot, no_file_error: str, expected_type: str | None = None):
     """
     Получить файл от пользователя
