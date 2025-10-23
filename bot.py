@@ -66,9 +66,7 @@ class MyExceptionHandler(telebot.ExceptionHandler):
         if contact_note:
             error_message += f"\nЕсли тебе кажется, что это баг, сообщи {OWNER_HANDLE}"
         bot.send_message(message.chat.id, error_message, reply_markup=reply_markup)
-        if handled:
-            return handled
-        raise exc
+        return handled
 
 
 bot = telebot.TeleBot(
@@ -332,7 +330,7 @@ def participant_stats(message: Message):
     response += f"Набрано баллов: <strong>{sum}</strong>"
     bot.send_message(
         message.chat.id, response,
-        reply_markup=ReplyKeyboardRemove() if participant.finished or OlympStatus.RESULTS else None
+        reply_markup=ReplyKeyboardRemove() if participant.finished or current_olymp.status == OlympStatus.RESULTS else None
     )
 
 
@@ -1724,13 +1722,13 @@ def queue(message: Message):
 def join_queue_handler(callback_query: CallbackQuery):
     message = callback_query.message
     bot.delete_message(message.chat.id, message.id)
+    participant: Participant = Participant.from_tg_id(callback_query.from_user.id, current_olymp.id)
     if callback_query.data.endswith('_cancel'):
         bot.send_message(
             message.chat.id, "Действие отменено", 
             reply_markup=participant_keyboard_olymp_finished if participant.finished else participant_keyboard
         )
         return
-    participant: Participant = Participant.from_tg_id(callback_query.from_user.id, current_olymp.id)
     queue_entry = participant.queue_entry
     if queue_entry:
         problem = Problem.from_id(queue_entry.problem_id)

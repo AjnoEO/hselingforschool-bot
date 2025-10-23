@@ -771,7 +771,7 @@ class Examiner(OlympMember):
             raise UserError(f"Пользователь {user_id} уже проверяющий в олимпиаде {olymp_id}")
         if exists:
             cursor.execute(
-                "UPDATE examiners SET conference_link = ?, busyness_level = ?, is_busy = ? WHERE olymp_id = ?, user_id = ?",
+                "UPDATE examiners SET conference_link = ?, busyness_level = ?, is_busy = ? WHERE olymp_id = ? AND user_id = ?",
                 (conference_link, busyness_level, int(is_busy), olymp_id, user_id)
             )
         else:
