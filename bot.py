@@ -400,6 +400,7 @@ def start_olymp():
                            f"{' или '.join(ASK_PEOPLE_HANDLES)} (организационные вопросы) "
                            f"или к {OWNER_HANDLE} (функционирование бота)")
     err_amount = 0
+    receivers = 0
     for p in participants:
         if p.tg_id:
             try:
@@ -520,10 +521,18 @@ def finish_olymp():
             f"Олимпиада частично завершена, {decline(participants_left, 'продолжа', ('ет', 'ют', 'ют'))} "
             f"участие {participants_left} {decline(participants_left, 'участник', ('', 'а', 'ов'))}"
         )
+    receivers = 0
+    err_amount = 0
     for e in current_olymp.get_examiners():
         if e.tg_id:
-            bot.send_message(e.tg_id, e_message)
+            try:
+                bot.send_message(e.tg_id, e_message)
+                receivers += 1
+            except Exception as send_error:
+                err_amount += 1
     bot.send_message(OWNER_ID, owner_message)
+    if err_amount and (err_amount > receivers / 2):
+        raise send_error
 
 
 @bot.message_handler(commands=['olymp_finish'], roles=['owner'])
@@ -550,6 +559,8 @@ def olymp_finish(message: Message):
                               "Можешь отправляться на заслуженный отдых")
     p_in_queue_message = ("Олимпиада завершилась! Больше записываться в очередь нельзя, "
                           "но тех, кто уже записался, мы проверим, так что не уходи")
+    err_amount = 0
+    receivers = 0
     for p in participants:
         p.finished = True
         if p.tg_id:
@@ -560,8 +571,9 @@ def olymp_finish(message: Message):
                     p_in_queue_message if is_in_queue else p_not_in_queue_message,
                     reply_markup = None if is_in_queue else participant_keyboard_olymp_finished
                 )
-            except Exception:
-                pass
+                receivers += 1
+            except Exception as send_error:
+                err_amount += 1
     if current_olymp.unhandled_queue_left(finished=True):
         participants_left = current_olymp.participants_amount(finished=False)
         if participants_left == 0:
@@ -576,8 +588,14 @@ def olymp_finish(message: Message):
                      "не идёт — тогда можешь идти отдыхать")
         for e in examiners:
             if e.tg_id:
-                bot.send_message(e.tg_id, e_message)
+                try:
+                    bot.send_message(e.tg_id, e_message)
+                    receivers += 1
+                except Exception as send_error:
+                    err_amount += 1
         bot.send_message(message.chat.id, owner_message)
+        if err_amount and (err_amount > receivers / 2):
+            raise send_error
     else:
         finish_olymp()
 
