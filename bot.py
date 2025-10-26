@@ -399,31 +399,47 @@ def start_olymp():
                            f"Если у тебя возникли вопросы, обращайся к "
                            f"{' или '.join(ASK_PEOPLE_HANDLES)} (организационные вопросы) "
                            f"или к {OWNER_HANDLE} (функционирование бота)")
+    err_amount = 0
     for p in participants:
         if p.tg_id:
-            bot.send_photo(
-                p.tg_id,
-                photo=InputFile(BUTTONS_IMG, "Где_кнопки.png"),
-                caption=BUTTON_HELP,
-                reply_markup=participant_keyboard,
-                show_caption_above_media=True
-            )
-            problem_block = p.last_block
-            bot.send_document(
-                p.tg_id,
-                document=InputFile(problem_block.path or ProblemBlock.DEFAULT_PATH, "Блок_1.pdf"),
-                caption=participant_message
-            )
+            try:
+                bot.send_photo(
+                    p.tg_id,
+                    photo=InputFile(BUTTONS_IMG, "Где_кнопки.png"),
+                    caption=BUTTON_HELP,
+                    reply_markup=participant_keyboard,
+                    show_caption_above_media=True
+                )
+                problem_block = p.last_block
+                bot.send_document(
+                    p.tg_id,
+                    document=InputFile(problem_block.path or ProblemBlock.DEFAULT_PATH, "Блок_1.pdf"),
+                    caption=participant_message
+                )
+                receivers += 1
+            except Exception as send_error:
+                err_amount += 1
     examiners = current_olymp.get_examiners()
     for e in examiners:
         if e.tg_id:
             bot.delete_state(e.tg_id, e.tg_id, bot_id = bot.bot_id)
-            bot.send_message(
-                e.tg_id, 
-                "Олимпиада началась! Напиши /free и ожидай участников\nСписок команд: /help",
-                reply_markup=ReplyKeyboardRemove(),
-            )
-    bot.send_message(OWNER_ID, f"Олимпиада <em>{current_olymp.name}</em> начата")
+            try:
+                bot.send_message(
+                    e.tg_id, 
+                    "Олимпиада началась! Напиши /free и ожидай участников\nСписок команд: /help",
+                    reply_markup=ReplyKeyboardRemove(),
+                )
+                receivers += 1
+            except Exception as send_error:
+                err_amount += 1
+    owner_message = f"Олимпиада <em>{current_olymp.name}</em> начата"
+    if err_amount:
+        owner_message += (
+            f"\n⚠️ Не удалось доставить сообщение {err_amount} {decline(err_amount, 'пользовател', ('ю', 'ям', 'ям'))}"
+        )
+    bot.send_message(OWNER_ID, owner_message)
+    if err_amount and (err_amount > receivers / 2):
+        raise send_error
 
 
 @bot.message_handler(commands=['olymp_start'], roles=['owner'])
@@ -537,12 +553,15 @@ def olymp_finish(message: Message):
     for p in participants:
         p.finished = True
         if p.tg_id:
-            is_in_queue = p.queue_entry is not None
-            bot.send_message(
-                p.tg_id,
-                p_in_queue_message if is_in_queue else p_not_in_queue_message,
-                reply_markup = None if is_in_queue else participant_keyboard_olymp_finished
-            )
+            try:
+                is_in_queue = p.queue_entry is not None
+                bot.send_message(
+                    p.tg_id,
+                    p_in_queue_message if is_in_queue else p_not_in_queue_message,
+                    reply_markup = None if is_in_queue else participant_keyboard_olymp_finished
+                )
+            except Exception:
+                pass
     if current_olymp.unhandled_queue_left(finished=True):
         participants_left = current_olymp.participants_amount(finished=False)
         if participants_left == 0:
@@ -1957,7 +1976,7 @@ def announce_command(message: Message):
     owner_response += " получил" + ("и" if p_amount + e_amount > 1 else "") + " оповещение!"
     if err_amount:
         owner_response += (
-            f"⚠️ Не удалось доставить сообщение {err_amount} {decline(err_amount, 'пользовател', ('ю', 'ям', 'ям'))}"
+            f"\n⚠️ Не удалось доставить сообщение {err_amount} {decline(err_amount, 'пользовател', ('ю', 'ям', 'ям'))}"
         )
     bot.send_message(message.chat.id, owner_response, reply_to_message_id=announcement.id)
     if err_amount and (err_amount > (p_amount + e_amount) / 2):
