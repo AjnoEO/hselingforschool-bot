@@ -15,5 +15,15 @@ TOKEN = __data["token"]
 OWNER_ID = int(__data["owner_id"])
 OWNER_HANDLE = __data["owner_handle"]
 
+__bot = __config["bot"]
+PROMOTE_COMMANDS = __bot.getboolean("promote_commands")
+NO_EXAMINER_COMPLAINTS = __bot.getboolean("no_examiner_complaints")
+MEMBER_PAGE_SIZE = __bot.getint("member_page_size")
+ASK_PEOPLE_HANDLES = [
+    handle.strip()
+    for handle in __bot["ask_people_handles"].split(",")
+    if handle.strip()
+]
+
 PREDEFINED_PATH = "predefined_files"
 BUTTONS_IMG = os.path.join(PREDEFINED_PATH, "buttons.png")

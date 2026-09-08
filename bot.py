@@ -4,7 +4,10 @@ import re
 from typing import Callable
 import json
 from db import create_update_db, StateDBStorage
-from data import TOKEN, OWNER_ID, OWNER_HANDLE, BUTTONS_IMG
+from data import (
+    TOKEN, OWNER_ID, OWNER_HANDLE, BUTTONS_IMG,
+    PROMOTE_COMMANDS, NO_EXAMINER_COMPLAINTS, MEMBER_PAGE_SIZE, ASK_PEOPLE_HANDLES,
+)
 import telebot
 from telebot.types import Message, CallbackQuery, InputFile, ReplyKeyboardMarkup, ReplyKeyboardRemove, ReplyParameters
 from telebot.formatting import escape_html
@@ -24,12 +27,6 @@ import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment
 from io import BytesIO
-
-
-PROMOTE_COMMANDS = False # Подсказывать ли команды участникам
-NO_EXAMINER_COMPLAINTS = False # Давать ли участникам возможность пожаловаться на то, что принимающий не пришёл
-MEMBER_PAGE_SIZE = 10 # Сколько членов олимпиады показывать в одном сообщении списка
-ASK_PEOPLE_HANDLES = ['@ladnoplyashem', '@sovasofya'] # TODO: Вынести в отдельный файл
 
 
 create_update_db()
