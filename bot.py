@@ -54,12 +54,17 @@ class MyExceptionHandler(telebot.ExceptionHandler):
             contact_note = contact_note and exc.contact_note
         else:
             traceback = exc.__traceback__
-            while traceback.tb_next: traceback = traceback.tb_next
+            print(traceback.tb_frame)
+            while traceback.tb_next:
+                traceback = traceback.tb_next
+                print(traceback.tb_frame)
             filename = os.path.split(traceback.tb_frame.f_code.co_filename)[1]
             line_number = traceback.tb_lineno
             error_message = (f"⚠️ Во время выполнения операции произошла ошибка:\n"
                              f"<code>{exc.__class__.__name__} "
-                             f"({filename}, строка {line_number}): {' '.join([escape_html(str(arg)) for arg in exc.args])}</code>")
+                             f"({filename}, строка {line_number}): "
+                             f"{' '.join([escape_html(str(arg)) for arg in exc.args])}</code>")
+            print(exc)
         if contact_note:
             error_message += f"\nЕсли тебе кажется, что это баг, сообщи {OWNER_HANDLE}"
         bot.send_message(message.chat.id, error_message, reply_markup=reply_markup)
@@ -1328,6 +1333,27 @@ def problem_block_create(message: Message):
     for problem in problem_block.problems:
         response += f"\n- <code>{problem.id}</code> {problem}"
     bot.send_message(message.chat.id, response)
+
+
+@bot.message_handler(commands=['test_problem_blocks_create'], roles=['owner'])
+def test_problem_blocks_create(message: Message):
+    if not current_olymp:
+        raise UserError("Нет текущей олимпиады")
+    path = os.path.join("predefined_files", "default_problem_block.pdf")
+    response_lines = ["Создал блоки:"]
+    for name in ["JUNIOR", "SENIOR"]:
+        problems: list[list[Problem]] = [[]]
+        for no in range(1, 10):
+            if len(problems[-1]) >= 3: problems.append([])
+            problems[-1].append(Problem.create(current_olymp.id, f"{name}, {no}", no_error=True))
+        for degree in range(1, 4):  
+            block_type = BlockType[f"{name}_{degree}"]
+            try:
+                problem_block = ProblemBlock.create(current_olymp.id, problems[degree-1], block_type=block_type, path=path)
+                response_lines.append(f"- <code>{problem_block.id}</code>")
+            except UserError:
+                pass
+    bot.send_message(message.chat.id, "".join(response_lines))
 
 
 @bot.message_handler(commands=['problem_block_list'], roles=['owner', 'examiner'])
