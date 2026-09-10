@@ -1655,7 +1655,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
     )
     examiner_response = (f"К тебе идёт сдавать задачу {problem} "
                          f"участник {participant.full_name} ({participant.grade} класс). ")
-    examiner_response += participant.display_tags()
+    examiner_response += participant.display_tags(sep="; ", end=". ")
     examiner_response += (f"Ты можешь принять или отклонить решение, а также отменить сдачу (например, если участник "
                           f"не пришёл или если ты не хочешь учитывать эту сдачу как потраченную попытку)")
     if current_olymp.status == OlympStatus.QUEUE or participant.finished:

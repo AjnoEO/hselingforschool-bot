@@ -180,7 +180,7 @@ class User:
     def display_tg_handle(self, hide_id: bool = False) -> str:
         return (f"Без хэндла" if hide_id else f"ID: <code>{self.tg_handle}</code>") if self.tg_handle.isnumeric() else f"@{self.tg_handle}"
     
-    def display_tags(self, verbose: bool = False, hide_name: bool = True) -> str:
+    def display_tags(self, verbose: bool = False, hide_name: bool = True, sep: str = "\n", end: str = "") -> str:
         result = ""
         if verbose:
             amount = len(self.tags)
@@ -194,7 +194,10 @@ class User:
                 tag_list.append(f"<code>{escape_html(tag.name)}</code>: {tag}")
             else:
                 tag_list.append(str(tag))
-        return result + "\n".join(tag_list)
+        if tag_list:
+            return result + sep.join(tag_list) + end
+        else:
+            return result + end
 
     def add_tag(self, tag: Tag | int):
         if isinstance(tag, Tag):
