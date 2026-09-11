@@ -585,9 +585,9 @@ def olymp_finish(message: Message):
         else:
             e_message = "Олимпиада частично завершилась! "
             owner_message = "Олимпиада завершена для части участников. Идёт работа с очередью"
-        e_message = ("Но мы ещё работаем с очередью, так что не уходи раньше времени. "
-                     "Если ты завершил(-а) проверку, и даже в статусе /free к тебе никто "
-                     "не идёт — тогда можешь идти отдыхать")
+        e_message += ("Но мы ещё работаем с очередью, так что не уходи раньше времени. "
+                      "Если ты завершил(-а) проверку, и даже в статусе /free к тебе никто "
+                      "не идёт — тогда можешь идти отдыхать")
         for e in examiners:
             if e.tg_id:
                 try:
@@ -708,7 +708,7 @@ def upload_members_command(message: Message):
 
 def add_member(message: Message, min_args: int, max_args: int, no_arg_error: str,
                additional_values_func: Callable[[list[str]], dict[str]],
-               member_class: type[OlympMember], term_pl_gen: str):
+               member_class: type[OlympMember], term_pl_gen: str, ok_if_exists: bool = False):
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
     tg_handle, name, surname, *other_args = get_n_args(
@@ -717,7 +717,7 @@ def add_member(message: Message, min_args: int, max_args: int, no_arg_error: str
     other_args = additional_values_func(other_args)
     member: OlympMember = member_class.create_as_new_user(
         tg_handle, name, surname, olymp_id=current_olymp.id,
-        **other_args, ok_if_user_exists=True
+        **other_args, ok_if_user_exists=True, ok_if_exists=ok_if_exists
     )
     bot.send_message(message.chat.id, f"{member} добавлен(-а) в список {term_pl_gen}")
 
@@ -737,6 +737,21 @@ def add_member_command(message: Message):
             lambda args: {'conference_link': args[0], 'problems': list(map(int, args[1].split())) if args[1][0] != '0' else None},
             Examiner, "принимающих"
         )
+
+
+@bot.message_handler(commands=['add_test_members'], roles=['owner'])
+def add_test_members(message: Message):
+    message.text += f" @{message.from_user.username} OWNER OWNER"
+    add_member(
+        message, 3, 3, "",
+        lambda _: {'grade': 8, 'last_block_number': None},
+        Participant, "участников", ok_if_exists=True
+    )
+    add_member(
+        message, 3, 3, "", 
+        lambda _: {'conference_link': "example.com", 'problems': [pr.id for pr in current_olymp.get_problems()]},
+        Examiner, "принимающих", ok_if_exists=True
+    )
 
 
 def edit_member(
