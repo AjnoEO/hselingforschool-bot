@@ -5,12 +5,16 @@ from enums import OlympStatus, QueueStatus, BlockType
 from telebot.states import State
 from telebot.storage.base_storage import StateStorageBase
 
-__DATABASE_DIR = "database"
+__DEFAULT_DATABASE_DIR = "database"
 __DATABASE_FILE = "olymp.db"
-DATABASE = os.path.join(__DATABASE_DIR, __DATABASE_FILE)
+_DATABASE_DEFAULT = os.path.join(__DEFAULT_DATABASE_DIR, __DATABASE_FILE)
+# Путь к базе можно переопределить переменной окружения (используется в тестах)
+DATABASE = os.environ.get("OLYMP_DB", _DATABASE_DEFAULT)
+__DATABASE_DIR = os.path.dirname(os.path.abspath(DATABASE))
 DB_VERSION = 6
-DB_VERSION_FILE = os.path.join(__DATABASE_DIR, "version.txt")
-SCRIPT_FILE = os.path.join(__DATABASE_DIR, "db.sql")
+DB_VERSION_FILE = os.path.join(__DEFAULT_DATABASE_DIR, "version.txt")
+__SCRIPT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), __DEFAULT_DATABASE_DIR)
+SCRIPT_FILE = os.path.join(__SCRIPT_DIR, "db.sql")
 
 def set_enum(enum_type: type[Enum], table: str, cursor: sqlite3.Cursor):
     for e in list(enum_type):
@@ -26,7 +30,8 @@ def set_enum(enum_type: type[Enum], table: str, cursor: sqlite3.Cursor):
     cursor.connection.commit()
 
 def create_update_db():
-    if __DATABASE_FILE not in os.listdir(__DATABASE_DIR):
+    os.makedirs(__DATABASE_DIR, exist_ok=True)
+    if not os.path.exists(DATABASE):
         with open(SCRIPT_FILE, encoding="utf8") as f:
             script = f.read()
         with sqlite3.connect(DATABASE) as con:
@@ -39,7 +44,7 @@ def create_update_db():
         if current_version != DB_VERSION:
             scripts = []
             for version in range(current_version + 1, DB_VERSION + 1):
-                update_file = os.path.join(__DATABASE_DIR, f"update_{version}.sql")
+                update_file = os.path.join(__SCRIPT_DIR, f"update_{version}.sql")
                 with open(update_file, encoding="utf8") as f:
                     scripts.append(f.read())
             with sqlite3.connect(DATABASE) as con:
@@ -63,6 +68,13 @@ class StateDBStorage(StateStorageBase):
     ):
         self.database = database_path
         self.table_name = table_name
+        self.__table_created = False
+
+
+    def __create_table(self):
+        """Создать таблицу при первом обращении, чтобы не трогать базу при создании хранилища"""
+        if self.__table_created:
+            return
         q = (f"""
         CREATE TABLE IF NOT EXISTS {self.table_name} (
             chat_id INTEGER NOT NULL,
@@ -78,6 +90,7 @@ class StateDBStorage(StateStorageBase):
             cur = conn.cursor()
             cur.execute(q)
             conn.commit()
+        self.__table_created = True
 
 
     @staticmethod
@@ -100,6 +113,7 @@ class StateDBStorage(StateStorageBase):
     ) -> bool:
         if hasattr(state, "name"):
             state = state.name
+        self.__create_table()
         params = [chat_id, user_id, business_connection_id, message_thread_id, bot_id]
         param_columns = self.__param_columns()
 
@@ -124,6 +138,7 @@ class StateDBStorage(StateStorageBase):
         message_thread_id: int | None = None,
         bot_id: int | None = None,
     ) -> str | None:
+        self.__create_table()
         params = [chat_id, user_id, business_connection_id, message_thread_id, bot_id]
         param_columns = self.__param_columns(params)
         while None in params:
@@ -147,6 +162,7 @@ class StateDBStorage(StateStorageBase):
         message_thread_id: int | None = None,
         bot_id: int | None = None,
     ) -> bool:
+        self.__create_table()
         params = [chat_id, user_id, business_connection_id, message_thread_id, bot_id]
         param_columns = self.__param_columns(params)
         while None in params:

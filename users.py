@@ -468,7 +468,7 @@ class Participant(OlympMember):
         finished: bool = False,
         ok_if_exists: bool = False,
         cursor: sqlite3.Cursor | None = None,
-    ):
+    ) -> Participant:
         """
         Добавить пользователя как участника в таблицу participants
         """
@@ -550,7 +550,7 @@ class Participant(OlympMember):
         return participant
 
     @classmethod
-    def from_id(cls, id: int, no_error: bool = False):
+    def from_id(cls, id: int, no_error: bool = False) -> (Participant | None):
         if no_error:
             return super().from_id(id, "participants", error_user_not_found=None)
         return super().from_id(id, "participants", error_user_not_found="Участник не найден")
@@ -761,7 +761,7 @@ class Examiner(OlympMember):
         is_busy: bool = True,
         ok_if_exists: bool = False,
         cursor: sqlite3.Cursor | None = None,
-    ):
+    ) -> Examiner:
         """
         Добавить пользователя как принимающего в таблицу examiners
         """
@@ -855,7 +855,7 @@ class Examiner(OlympMember):
         return examiner
 
     @classmethod
-    def from_id(cls, id: int, no_error: bool = False):
+    def from_id(cls, id: int, no_error: bool = False) -> (Examiner | None):
         if no_error:
             return super().from_id(id, "examiners", error_user_not_found=None)
         return super().from_id(id, "examiners", error_user_not_found="Принимающий не найден")

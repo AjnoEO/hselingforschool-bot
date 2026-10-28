@@ -29,9 +29,6 @@ from openpyxl.styles import Font, Alignment
 from io import BytesIO
 
 
-create_update_db()
-
-
 class MyExceptionHandler(telebot.ExceptionHandler):
     def handle(self, exc: Exception):
         message = None
@@ -132,7 +129,7 @@ bot.add_custom_filter(OlympStatusFilter())
 bot.add_custom_filter(DocCommandsFilter())
 bot.add_custom_filter(DiscussingExaminerFilter())
 
-current_olymp = Olymp.current()
+current_olymp: Olymp | None = None
 
 
 JOIN_QUEUE_BUTTON = "Сдать задачу"
@@ -1368,7 +1365,7 @@ def test_problem_blocks_create(message: Message):
                 response_lines.append(f"- <code>{problem_block.id}</code>")
             except UserError:
                 pass
-    bot.send_message(message.chat.id, "".join(response_lines))
+    bot.send_message(message.chat.id, "\n".join(response_lines))
 
 
 @bot.message_handler(commands=['problem_block_list'], roles=['owner', 'examiner'])
@@ -2128,17 +2125,26 @@ def other_messages(message: Message):
     raise UserError(error_message, contact_note=False)
 
 
-print("Запускаю бота...")
+def main():
+    global current_olymp
+    create_update_db()
+    current_olymp = Olymp.current()
 
-owner_startup_message = "Бот запущен!"
-if not current_olymp:
-    owner_startup_message += (
-        "\nТекущая олимпиада не выбрана. Чтобы установить текущую олимпиаду, используй команду <code>"
-        + escape_html("/olymp_select <название>")
-        + "</code>")
-try:
-    bot.send_message(OWNER_ID, owner_startup_message)
-except ApiTelegramException as e:
-    print("! Не удалось оповестить владельца. Проверь owner_id в файле config.ini")
+    print("Запускаю бота...")
 
-bot.infinity_polling()
+    owner_startup_message = "Бот запущен!"
+    if not current_olymp:
+        owner_startup_message += (
+            "\nТекущая олимпиада не выбрана. Чтобы установить текущую олимпиаду, используй команду <code>"
+            + escape_html("/olymp_select <название>")
+            + "</code>")
+    try:
+        bot.send_message(OWNER_ID, owner_startup_message)
+    except ApiTelegramException as e:
+        print("! Не удалось оповестить владельца. Проверь owner_id в файле config.ini")
+
+    bot.infinity_polling()
+
+
+if __name__ == "__main__":
+    main()

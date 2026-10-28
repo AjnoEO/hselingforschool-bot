@@ -1,11 +1,13 @@
 import os
 from configparser import ConfigParser
 
-if os.path.exists("config.ini"):
+# Путь к конфигу можно переопределить переменной окружения (используется в тестах)
+CONFIG_FILE = os.environ.get("OLYMP_CONFIG", "config.ini")
+if os.path.exists(CONFIG_FILE):
     __config = ConfigParser()
-    __config.read("config.ini")
+    __config.read(CONFIG_FILE)
 else:
-    raise FileExistsError("Отсутствует файл config.ini.\n"
+    raise FileExistsError(f"Отсутствует файл {CONFIG_FILE}.\n"
                           "Если вы клонировали или запуллили git-репозиторий, "
                           "убедитесь, что вы скопировали example.config.ini, "
                           "переименовали его config.ini и исправили под себя.")
