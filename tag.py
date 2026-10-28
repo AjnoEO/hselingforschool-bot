@@ -1,5 +1,5 @@
-import sqlite3
-from db import DATABASE
+from sqlite3 import Cursor
+from db import db_connection
 from utils import UserError, update_in_table, provide_cursor
 from telebot.formatting import escape_html
 
@@ -16,7 +16,7 @@ class Tag:
 
     @classmethod
     def from_id(cls, id: int):
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT * FROM tags WHERE id = ?", (id,))
             fetch = cur.fetchone()
@@ -26,7 +26,7 @@ class Tag:
     
     @classmethod
     def from_name(cls, name: str, no_error: bool = False):
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT * FROM tags WHERE name = ?", (name,))
             fetch = cur.fetchone()
@@ -44,7 +44,7 @@ class Tag:
         description: str,
         *,
         no_error: bool = False,
-        cursor: sqlite3.Cursor | None = None,
+        cursor: Cursor | None = None,
     ):
         """
         Добавить тэг в таблицу tags
@@ -65,13 +65,13 @@ class Tag:
     
     @classmethod
     @provide_cursor
-    def get_all(cls, *, cursor: sqlite3.Cursor | None = None):
+    def get_all(cls, *, cursor: Cursor | None = None):
         cursor.execute("SELECT * FROM tags")
         results = cursor.fetchall()
         return [cls(*fetch) for fetch in results]
 
     @provide_cursor
-    def delete(self, *, cursor: sqlite3.Cursor | None = None):
+    def delete(self, *, cursor: Cursor | None = None):
         cursor.execute("DELETE FROM tags WHERE id = ?", (self.id,))
 
 

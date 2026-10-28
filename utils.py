@@ -1,4 +1,4 @@
-import sqlite3
+from sqlite3 import Cursor
 from telebot.types import Message, Document
 from telebot.util import generate_random_token
 from telebot import TeleBot
@@ -7,7 +7,7 @@ import os
 from data import TOKEN
 import requests
 from functools import wraps
-from db import DATABASE
+from db import db_connection
 
 class UserError(Exception):
     """Ошибки, вызванные неправильными действиями пользователей"""
@@ -100,7 +100,7 @@ def provide_cursor(func):
     def wrapper(*args, **kwargs):
         if 'cursor' in kwargs:
             return func(*args, **kwargs)
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cursor = conn.cursor()
             result = func(*args, **kwargs, cursor=cursor)
             conn.commit()
@@ -108,7 +108,7 @@ def provide_cursor(func):
     return wrapper
 
 @provide_cursor
-def value_exists(table: str, column_values: dict[str], *, cursor: sqlite3.Cursor | None = None) -> bool:
+def value_exists(table: str, column_values: dict[str], *, cursor: Cursor | None = None) -> bool:
     conditions = []
     values = []
     for c, v in column_values.items():
@@ -119,7 +119,7 @@ def value_exists(table: str, column_values: dict[str], *, cursor: sqlite3.Cursor
     return bool(result[0])
 
 def update_in_table(table: str, column: str, value, id_column: str, id_value):
-    with sqlite3.connect(DATABASE) as conn:
+    with db_connection() as conn:
         cur = conn.cursor()
         q = f"UPDATE {table} SET {column} = ? WHERE {id_column} = ?"
         cur.execute(q, (value, id_value))

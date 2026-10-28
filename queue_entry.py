@@ -1,6 +1,5 @@
-import sqlite3
 from enums import QueueStatus
-from db import DATABASE
+from db import db_connection
 from utils import update_in_table, UserError
 
 class QueueEntry:
@@ -22,7 +21,7 @@ class QueueEntry:
 
     @classmethod
     def from_id(cls, id: int):
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute(f"SELECT * FROM queue WHERE id = ?", (id,))
             fetch = cur.fetchone()
@@ -39,7 +38,7 @@ class QueueEntry:
         """
         if self.status != QueueStatus.WAITING:
             raise ValueError("Нельзя искать принимающих для записей не в статусе ожидания")
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()            
             q = """
                 SELECT

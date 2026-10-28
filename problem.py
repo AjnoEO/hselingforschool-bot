@@ -1,8 +1,8 @@
 import os
 from enums import BlockType
-import sqlite3
+from sqlite3 import Cursor
 from data import PREDEFINED_PATH
-from db import DATABASE
+from db import db_connection
 from utils import UserError, update_in_table, provide_cursor, decline
 from telebot.formatting import escape_html
 
@@ -19,7 +19,7 @@ class Problem:
 
     @classmethod
     def from_id(cls, id: int):
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT * FROM problems WHERE id = ?", (id,))
             fetch = cur.fetchone()
@@ -29,7 +29,7 @@ class Problem:
     
     @classmethod
     def from_name(cls, name: str, olymp_id: int, no_error: bool = False):
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT * FROM problems WHERE name = ? AND olymp_id = ?", (name, olymp_id))
             fetch = cur.fetchone()
@@ -47,7 +47,7 @@ class Problem:
         name: str,
         *,
         no_error: bool = False,
-        cursor: sqlite3.Cursor | None = None,
+        cursor: Cursor | None = None,
     ):
         """
         Добавить задачу в таблицу problems
@@ -68,7 +68,7 @@ class Problem:
 
 
     @provide_cursor
-    def get_blocks(self, *, cursor: sqlite3.Cursor | None = None):
+    def get_blocks(self, *, cursor: Cursor | None = None):
         cursor.execute(
             "SELECT * FROM problem_blocks WHERE first_problem = ? OR second_problem = ? OR third_problem = ?",
             (self.id, self.id, self.id)
@@ -78,7 +78,7 @@ class Problem:
 
 
     @provide_cursor
-    def delete(self, *, cursor: sqlite3.Cursor | None = None):
+    def delete(self, *, cursor: Cursor | None = None):
         pb_amount = len(self.get_blocks(cursor=cursor))
         if pb_amount > 0:
             raise UserError(f"Задача {self} входит в {pb_amount} {decline(pb_amount, 'блок', ('', 'а', 'ов'))} задач. "
@@ -140,7 +140,7 @@ class ProblemBlock:
 
     @classmethod
     def from_id(cls, id: int):
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT * FROM problem_blocks WHERE id = ?", (id,))
             fetch = cur.fetchone()
@@ -155,7 +155,7 @@ class ProblemBlock:
         block_type: BlockType,
         no_error: bool = False,
     ):
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT * FROM problem_blocks WHERE olymp_id = ? AND block_type = ?", (olymp_id, block_type))
             fetch = cur.fetchone()
@@ -174,7 +174,7 @@ class ProblemBlock:
         block_type: BlockType | None = None,
         path: str | None = None,
         *,
-        cursor: sqlite3.Cursor | None = None,
+        cursor: Cursor | None = None,
     ):
         """
         Добавить блок задач в таблицу problem_blocks
@@ -206,7 +206,7 @@ class ProblemBlock:
         self.path = None
 
     def delete(self):
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("DELETE FROM problem_blocks WHERE id = ?", (self.id,))
             conn.commit()

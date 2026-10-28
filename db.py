@@ -1,5 +1,6 @@
 import os
 from enum import Enum
+from contextlib import contextmanager
 import sqlite3
 from enums import OlympStatus, QueueStatus, BlockType
 from telebot.states import State
@@ -15,6 +16,14 @@ DB_VERSION = 6
 DB_VERSION_FILE = os.path.join(__DEFAULT_DATABASE_DIR, "version.txt")
 __SCRIPT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), __DEFAULT_DATABASE_DIR)
 SCRIPT_FILE = os.path.join(__SCRIPT_DIR, "db.sql")
+
+@contextmanager
+def db_connection(db: str = DATABASE):
+    conn = sqlite3.connect(db)
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 def set_enum(enum_type: type[Enum], table: str, cursor: sqlite3.Cursor):
     for e in list(enum_type):
@@ -34,7 +43,7 @@ def create_update_db():
     if not os.path.exists(DATABASE):
         with open(SCRIPT_FILE, encoding="utf8") as f:
             script = f.read()
-        with sqlite3.connect(DATABASE) as con:
+        with db_connection() as con:
             cur = con.cursor()
             cur.executescript(script)
             con.commit()
@@ -47,14 +56,14 @@ def create_update_db():
                 update_file = os.path.join(__SCRIPT_DIR, f"update_{version}.sql")
                 with open(update_file, encoding="utf8") as f:
                     scripts.append(f.read())
-            with sqlite3.connect(DATABASE) as con:
+            with db_connection() as con:
                 cur = con.cursor()
                 for script in scripts:
                     cur.executescript(script)
                 con.commit()
     with open(DB_VERSION_FILE, "w") as f:
         f.write(str(DB_VERSION))
-    with sqlite3.connect(DATABASE) as con:
+    with db_connection() as con:
         cur = con.cursor()
         set_enum(OlympStatus, "olymp_status", cursor=cur)
         set_enum(QueueStatus, "queue_status", cursor=cur)
@@ -86,7 +95,7 @@ class StateDBStorage(StateStorageBase):
             PRIMARY KEY(chat_id, user_id, bot_id)
         )
         """)
-        with sqlite3.connect(self.database) as conn:
+        with db_connection(self.database) as conn:
             cur = conn.cursor()
             cur.execute(q)
             conn.commit()
@@ -117,7 +126,7 @@ class StateDBStorage(StateStorageBase):
         params = [chat_id, user_id, business_connection_id, message_thread_id, bot_id]
         param_columns = self.__param_columns()
 
-        with sqlite3.connect(self.database) as conn:
+        with db_connection(self.database) as conn:
             cur = conn.cursor()
             q = (f"INSERT INTO {self.table_name} ({param_columns}, state) "
                  f"VALUES ({', '.join('?'*(len(params)+1))}) "
@@ -144,7 +153,7 @@ class StateDBStorage(StateStorageBase):
         while None in params:
             params.remove(None)
 
-        with sqlite3.connect(self.database) as conn:
+        with db_connection(self.database) as conn:
             cur = conn.cursor()
             cur.execute(
                 f"SELECT state FROM {self.table_name} WHERE {param_columns}",
@@ -168,7 +177,7 @@ class StateDBStorage(StateStorageBase):
         while None in params:
             params.remove(None)
 
-        with sqlite3.connect(self.database) as conn:
+        with db_connection(self.database) as conn:
             cur = conn.cursor()
             cur.execute(
                 f"DELETE FROM {self.table_name} WHERE {param_columns}",

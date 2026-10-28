@@ -1,5 +1,5 @@
-import sqlite3
-from db import DATABASE
+from sqlite3 import Cursor
+from db import db_connection
 from utils import UserError, decline, provide_cursor, value_exists, update_in_table
 from tag import Tag
 from enums import OlympStatus
@@ -37,7 +37,7 @@ class User:
         tg_id: int | None = None,
         tags: list[int] | None = None,
         ok_if_exists: bool = False,
-        cursor: sqlite3.Cursor | None = None,
+        cursor: Cursor | None = None,
     ):
         """
         Добавить пользователя в таблицу users
@@ -94,7 +94,7 @@ class User:
             given_value = tg_handle
         else:
             raise ValueError(error_no_id_provided)
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             if not value_exists("users", {checked_column: given_value}, cursor=cur):
                 if not error_user_not_found:
@@ -119,7 +119,7 @@ class User:
             or (user_id and user.user_id != user_id)
             or (tg_handle and user.tg_handle != tg_handle)):
             raise ValueError(error_ids_dont_match)
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT tag_id FROM user_tags WHERE user_id = ?", (user.__user_id,))
             result = cur.fetchall()
@@ -154,7 +154,7 @@ class User:
 
 
     @provide_cursor
-    def remove(self, *, cursor: sqlite3.Cursor | None = None):
+    def remove(self, *, cursor: Cursor | None = None):
         cursor.execute("DELETE FROM users WHERE user_id = ?", (self.user_id,))
 
 
@@ -165,7 +165,7 @@ class User:
         new_surname = new_user.surname
         new_tg_handle = new_user.tg_handle
         new_tags = new_user.tags
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("UPDATE participants SET user_id = ? WHERE user_id = ?", (self.user_id, new_user.user_id))
             cur.execute("UPDATE examiners SET user_id = ? WHERE user_id = ?", (self.user_id, new_user.user_id))
@@ -204,7 +204,7 @@ class User:
             tag = tag.id
         if tag in self.tags:
             raise ValueError(f"У пользователя {self.user_id} уже есть тэг {tag}")
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("INSERT INTO user_tags(user_id, tag_id) VALUES (?, ?)", (self.user_id, tag))
             conn.commit()
@@ -215,7 +215,7 @@ class User:
             tag = tag.id
         if tag not in self.tags:
             raise ValueError(f"У пользователя {self.user_id} уже нет тэга {tag}")
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("DELETE FROM user_tags WHERE user_id = ? AND tag_id = ?", (self.user_id, tag))
             conn.commit()
@@ -234,7 +234,7 @@ class User:
         for tag in tags:
             if tag not in self.tags:
                 add.append(tag)
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             for tag in remove:
                 cur.execute("DELETE FROM user_tags WHERE user_id = ? AND tag_id = ?", (self.user_id, tag))
@@ -322,7 +322,7 @@ class OlympMember(User):
                             error_ids_dont_match=error_ids_dont_match)
         if not user:
             return None
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             if not value_exists(table, {"user_id": user.user_id, "olymp_id": olymp_id}, cursor = cur):
                 if not error_user_not_found:
@@ -376,7 +376,7 @@ class OlympMember(User):
         *,
         error_user_not_found: str | None = "Пользователь не найден в базе",
     ):
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute(f"SELECT user_id, olymp_id FROM {table} WHERE id = ?", (id,))
             fetch = cur.fetchone()
@@ -416,7 +416,7 @@ class OlympMember(User):
         self.display_data(verbose, olymp_status, technical_info, contact_note)
 
     def _queue_entry(self, id_column: str):
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             q = (f"SELECT * FROM queue WHERE {id_column} = ? "
                  f"AND status IN ({', '.join(map(str, QueueStatus.active(as_numbers=True)))})")
@@ -467,7 +467,7 @@ class Participant(OlympMember):
         last_block_number: int | None = None,
         finished: bool = False,
         ok_if_exists: bool = False,
-        cursor: sqlite3.Cursor | None = None,
+        cursor: Cursor | None = None,
     ) -> Participant:
         """
         Добавить пользователя как участника в таблицу participants
@@ -509,7 +509,7 @@ class Participant(OlympMember):
         finished: bool = False,
         ok_if_user_exists: bool = False,
         ok_if_exists: bool = False,
-        cursor: sqlite3.Cursor | None = None,
+        cursor: Cursor | None = None,
     ):
         """
         Добавить пользователя в таблицу users и добавить его как участника в таблицу participants
@@ -633,9 +633,10 @@ class Participant(OlympMember):
         if isinstance(problem, int):
             problem = self.problem_from_number(problem)
 
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("INSERT INTO queue(olymp_id, participant_id, problem_id) VALUES (?, ?, ?)", (self.olymp_id, self.id, problem.id))
+            conn.commit()
             queue_entry = QueueEntry(cur.lastrowid, self.olymp_id, self.id, problem.id)
 
         examiner_id = queue_entry.look_for_examiner()
@@ -657,7 +658,7 @@ class Participant(OlympMember):
         """
         if isinstance(problem, int):
             problem = self.problem_from_number(problem)
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute(
                 "SELECT 1 FROM queue WHERE participant_id = ? AND problem_id = ? AND status = ?", 
@@ -760,7 +761,7 @@ class Examiner(OlympMember):
         busyness_level: int = 0,
         is_busy: bool = True,
         ok_if_exists: bool = False,
-        cursor: sqlite3.Cursor | None = None,
+        cursor: Cursor | None = None,
     ) -> Examiner:
         """
         Добавить пользователя как принимающего в таблицу examiners
@@ -809,7 +810,7 @@ class Examiner(OlympMember):
         is_busy: bool = True,
         ok_if_user_exists: bool = False,
         ok_if_exists: bool = False,
-        cursor: sqlite3.Cursor | None = None,
+        cursor: Cursor | None = None,
     ):
         """
         Добавить пользователя в таблицу users и добавить его как принимающего в таблицу examiners
@@ -847,7 +848,7 @@ class Examiner(OlympMember):
         examiner.__conference_link = examiner._additional_values["conference_link"]
         examiner.__busyness_level = examiner._additional_values["busyness_level"]
         examiner.__is_busy = bool(examiner._additional_values["is_busy"])
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT problem_id FROM examiner_problems WHERE examiner_id = ?", (examiner.__id,))
             result = cur.fetchall()
@@ -923,7 +924,7 @@ class Examiner(OlympMember):
         """
         if self.queue_entry:
             raise ValueError(f"Принимающий {self.id} уже есть в очереди (запись {self.queue_entry.id})")
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()            
             q = f"""
                 SELECT
@@ -946,7 +947,7 @@ class Examiner(OlympMember):
             problem = problem.id
         if problem in self.problems:
             raise ValueError(f"Принимающий {self.id} уже принимает задачу {problem}")
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("INSERT INTO examiner_problems(examiner_id, problem_id) VALUES (?, ?)", (self.id, problem))
             conn.commit()
@@ -957,7 +958,7 @@ class Examiner(OlympMember):
             problem = problem.id
         if problem not in self.problems:
             raise ValueError(f"Принимающий {self.id} уже не принимает задачу {problem}")
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("DELETE FROM examiner_problems WHERE examiner_id = ? AND problem_id = ?", (self.id, problem))
             conn.commit()
@@ -976,7 +977,7 @@ class Examiner(OlympMember):
         for problem in problems:
             if problem not in self.problems:
                 add.append(problem)
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             for problem in remove:
                 cur.execute("DELETE FROM examiner_problems WHERE examiner_id = ? AND problem_id = ?", (self.id, problem))
