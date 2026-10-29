@@ -2,7 +2,7 @@ import os
 from enum import Enum
 from contextlib import contextmanager
 import sqlite3
-from enums import OlympStatus, QueueStatus, BlockType
+from enums import OlympStatus, QueueStatus, BlockType, Platform
 from telebot.states import State
 from telebot.storage.base_storage import StateStorageBase
 
@@ -12,8 +12,8 @@ _DATABASE_DEFAULT = os.path.join(__DEFAULT_DATABASE_DIR, __DATABASE_FILE)
 # Путь к базе можно переопределить переменной окружения (используется в тестах)
 DATABASE = os.environ.get("OLYMP_DB", _DATABASE_DEFAULT)
 __DATABASE_DIR = os.path.dirname(os.path.abspath(DATABASE))
-DB_VERSION = 6
-DB_VERSION_FILE = os.path.join(__DEFAULT_DATABASE_DIR, "version.txt")
+DB_VERSION = 7
+DB_VERSION_FILE = os.path.join(__DATABASE_DIR, "version.txt")
 __SCRIPT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), __DEFAULT_DATABASE_DIR)
 SCRIPT_FILE = os.path.join(__SCRIPT_DIR, "db.sql")
 
@@ -68,6 +68,7 @@ def create_update_db():
         set_enum(OlympStatus, "olymp_status", cursor=cur)
         set_enum(QueueStatus, "queue_status", cursor=cur)
         set_enum(BlockType, "block_types", cursor=cur)
+        set_enum(Platform, "platforms", cursor=cur)
 
 class StateDBStorage(StateStorageBase):
     def __init__(

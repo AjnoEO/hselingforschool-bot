@@ -18,6 +18,7 @@ from telebot.states.sync.middleware import StateMiddleware
 from telebot.util import quick_markup, extract_command
 from telebot.apihelper import ApiTelegramException
 from olymp import Olymp, OlympStatus
+from enums import Platform
 from users import User, OlympMember, Participant, Examiner
 from tag import Tag
 from problem import Problem, ProblemBlock, BlockType
@@ -93,9 +94,11 @@ class RolesFilter(AdvancedCustomFilter): # owner, examiner, participant
             return True
         if not current_olymp:
             return False
-        if 'examiner' in roles and Examiner.from_tg_id(message.from_user.id, current_olymp.id, no_error=True):
+        if ('examiner' in roles
+            and Examiner.from_external_id(Platform.TELEGRAM, message.from_user.id, current_olymp.id, no_error=True)):
             return True
-        if 'participant' in roles and Participant.from_tg_id(message.from_user.id, current_olymp.id, no_error=True):
+        if ('participant' in roles
+            and Participant.from_external_id(Platform.TELEGRAM, message.from_user.id, current_olymp.id, no_error=True)):
             return True
         return False
 
@@ -120,7 +123,8 @@ class DiscussingExaminerFilter(SimpleCustomFilter):
     def check(message: Message):
         if not current_olymp: return False
         if current_olymp.status not in [OlympStatus.CONTEST, OlympStatus.QUEUE]: return False
-        examiner: Examiner | None = Examiner.from_tg_id(message.from_user.id, current_olymp.id, no_error=True)
+        examiner: Examiner | None = \
+            Examiner.from_external_id(Platform.TELEGRAM, message.from_user.id, current_olymp.id, no_error=True)
         if not examiner: return False
         return examiner.queue_entry is not None
         
@@ -180,8 +184,10 @@ def lost(message: Message):
 def send_welcome(message: Message):
     olymp_id = current_olymp.id
     tg_id = message.from_user.id
-    member: Participant | Examiner | None = \
-        Participant.from_tg_id(tg_id, olymp_id, no_error=True) or Examiner.from_tg_id(tg_id, olymp_id, no_error=True)
+    member: Participant | Examiner | None = (
+        Participant.from_external_id(Platform.TELEGRAM, tg_id, olymp_id, no_error=True)
+        or Examiner.from_external_id(Platform.TELEGRAM, tg_id, olymp_id, no_error=True)
+    )
     if isinstance(member, Participant) and member.finished:
         raise UserError("Неизвестная команда")
     if member:
@@ -189,19 +195,21 @@ def send_welcome(message: Message):
         return
     
     tg_handle = message.from_user.username or str(message.from_user.id)
-    new_member: Participant | Examiner | None = \
-        Participant.from_tg_handle(tg_handle, olymp_id, no_error=True) or Examiner.from_tg_handle(tg_handle, olymp_id, no_error=True)
+    new_member: Participant | Examiner | None = (
+        Participant.from_handle(Platform.TELEGRAM, tg_handle, olymp_id, no_error=True)
+        or Examiner.from_handle(Platform.TELEGRAM, tg_handle, olymp_id, no_error=True)
+    )
     if isinstance(new_member, Participant) and new_member.finished:
         raise UserError("Неизвестная команда")
     
-    user_old_handle = User.from_tg_id(tg_id, no_error=True)
+    user_old_handle = User.from_external_id(Platform.TELEGRAM, tg_id, no_error=True)
     if user_old_handle and new_member:
-        if user_old_handle.tg_handle.isnumeric():
+        if user_old_handle.handle.isnumeric():
             participant_reply = f"Ты участвовал(-а) в прошлой олимпиаде без хэндла?"
-        elif new_member.tg_handle.isnumeric():
-            participant_reply = f"У тебя раньше в Телеграме был хэндл @{user_old_handle.tg_handle}?"
+        elif new_member.handle.isnumeric():
+            participant_reply = f"У тебя раньше в Телеграме был хэндл @{user_old_handle.handle}?"
         else:
-            participant_reply = f"У тебя поменялся хэндл в Телеграме с @{user_old_handle.tg_handle} на @{new_member.tg_handle}?"
+            participant_reply = f"У тебя поменялся хэндл в Телеграме с @{user_old_handle.handle} на @{new_member.handle}?"
         bot.send_message(
             message.chat.id, 
             participant_reply,
@@ -213,7 +221,7 @@ def send_welcome(message: Message):
         return
     
     if new_member:
-        new_member.tg_id = tg_id
+        new_member.external_id = tg_id
         send_authentication_confirmation(new_member)
         return
     
@@ -228,8 +236,8 @@ def handle_change_handler(callback_query: CallbackQuery):
     if not handle_changed:
         bot.send_message(message.chat.id, f"Что-то пошло не так. Напиши {OWNER_HANDLE}")
         return
-    old_user = User.from_tg_id(callback_query.from_user.id)
-    new_user = User.from_tg_handle(callback_query.from_user.username)
+    old_user = User.from_external_id(Platform.TELEGRAM, callback_query.from_user.id)
+    new_user = User.from_handle(Platform.TELEGRAM, callback_query.from_user.username)
     old_user.conflate_with(new_user)
     user_id = old_user.user_id
     olymp_id = current_olymp.id
@@ -258,10 +266,10 @@ def send_authentication_confirmation(member: OlympMember, *, already_authenticat
                      "Когда олимпиада начнётся, бот пришлёт тебе задания и ты сможешь записываться на сдачу задач через него")
     else:
         response += "\n❗️ Олимпиада уже началась!"
-    bot.send_message(member.tg_id, response)
+    bot.send_message(member.external_id, response)
     if current_olymp.status == OlympStatus.CONTEST and isinstance(member, Participant) and not member.finished:
         bot.send_photo(
-            member.tg_id,
+            member.external_id,
             photo=InputFile(BUTTONS_IMG, "Где_кнопки.png"),
             caption=BUTTON_HELP,
             reply_markup=participant_keyboard,
@@ -274,7 +282,7 @@ def send_all_problem_blocks(participant: Participant):
     for problem_block_number in range(1, participant.last_block_number+1):
         problem_block = participant.problem_block_from_number(problem_block_number)
         bot.send_document(
-            participant.tg_id,
+            participant.external_id,
             InputFile(problem_block.path or ProblemBlock.DEFAULT_PATH, f"Блок_{problem_block_number}.pdf")
         )
 
@@ -285,9 +293,9 @@ def help(message: Message):
     roles = []
     if message.from_user.id == OWNER_ID:
         roles.append('owner')
-    if current_olymp and Examiner.from_tg_id(message.from_user.id, current_olymp.id, no_error=True):
+    if current_olymp and Examiner.from_external_id(Platform.TELEGRAM, message.from_user.id, current_olymp.id, no_error=True):
         roles.append('examiner')
-    if current_olymp and Participant.from_tg_id(message.from_user.id, current_olymp.id, no_error=True):
+    if current_olymp and Participant.from_external_id(Platform.TELEGRAM, message.from_user.id, current_olymp.id, no_error=True):
         roles.append('participant')
     several_roles = (len(roles) > 1)
     for role in roles:
@@ -316,7 +324,7 @@ def help(message: Message):
     olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE, OlympStatus.RESULTS]
 )
 def participant_stats(message: Message):
-    participant: Participant = Participant.from_tg_id(message.from_user.id, current_olymp.id)
+    participant: Participant = Participant.from_external_id(Platform.TELEGRAM, message.from_user.id, current_olymp.id)
     response = f"Информация о сдачах задач:\n"
     sum, problem_info = participant.results()
     for i, (problem, success, number) in enumerate(problem_info):
@@ -339,7 +347,7 @@ def participant_stats(message: Message):
     olymp_statuses=[OlympStatus.REGISTRATION, OlympStatus.CONTEST, OlympStatus.QUEUE, OlympStatus.RESULTS]
 )
 def participant_info(message: Message):
-    participant: Participant = Participant.from_tg_id(message.from_user.id, current_olymp.id)
+    participant: Participant = Participant.from_external_id(Platform.TELEGRAM, message.from_user.id, current_olymp.id)
     response = (f"Информация о тебе:\n"
                 f"{participant.display_data(contact_note=False)}")
     if current_olymp.status != OlympStatus.REGISTRATION:
@@ -354,7 +362,7 @@ def participant_info(message: Message):
     olymp_statuses=[OlympStatus.REGISTRATION, OlympStatus.CONTEST, OlympStatus.QUEUE, OlympStatus.RESULTS]
 )
 def examiner_info(message: Message):
-    examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
+    examiner: Examiner = Examiner.from_external_id(Platform.TELEGRAM, message.from_user.id, current_olymp.id)
     response = (f"Информация о тебе:\n"
                 f"{examiner.display_data(verbose=True, olymp_status=current_olymp.status)}")
     bot.send_message(message.chat.id, response)
@@ -372,15 +380,15 @@ def olymp_reg_start(message: Message):
     participants = current_olymp.get_participants()
     examiners = current_olymp.get_examiners()
     for p in participants:
-        if p.tg_id:
+        if p.external_id:
             p_message = (f"Мы запустили авторизацию в боте для онлайн-участников. Тебя авторизовали автоматически!\n"
                          f"{p.display_data()}")
-            bot.send_message(p.tg_id, p_message)
+            bot.send_message(p.external_id, p_message)
     for e in examiners:
-        if e.tg_id:
+        if e.external_id:
             e_message = (f"Мы запустили авторизацию в боте. Тебя автоматически авторизовали как принимающего!\n"
                          f"{e.display_data()}")
-            bot.send_message(e.tg_id, e_message)
+            bot.send_message(e.external_id, e_message)
     bot.send_message(message.chat.id, f"Регистрация на олимпиаду <em>{current_olymp.name}</em> запущена")
 
 
@@ -401,10 +409,10 @@ def start_olymp():
     err_amount = 0
     receivers = 0
     for p in participants:
-        if p.tg_id:
+        if p.external_id:
             try:
                 bot.send_photo(
-                    p.tg_id,
+                    p.external_id,
                     photo=InputFile(BUTTONS_IMG, "Где_кнопки.png"),
                     caption=BUTTON_HELP,
                     reply_markup=participant_keyboard,
@@ -412,7 +420,7 @@ def start_olymp():
                 )
                 problem_block = p.last_block
                 bot.send_document(
-                    p.tg_id,
+                    p.external_id,
                     document=InputFile(problem_block.path or ProblemBlock.DEFAULT_PATH, "Блок_1.pdf"),
                     caption=participant_message
                 )
@@ -421,11 +429,11 @@ def start_olymp():
                 err_amount += 1
     examiners = current_olymp.get_examiners()
     for e in examiners:
-        if e.tg_id:
-            bot.delete_state(e.tg_id, e.tg_id, bot_id = bot.bot_id)
+        if e.external_id:
+            bot.delete_state(e.external_id, e.external_id, bot_id = bot.bot_id)
             try:
                 bot.send_message(
-                    e.tg_id, 
+                    e.external_id,
                     "Олимпиада началась! Напиши /free и ожидай участников\nСписок команд: /help",
                     reply_markup=ReplyKeyboardRemove(),
                 )
@@ -523,9 +531,9 @@ def finish_olymp():
     receivers = 0
     err_amount = 0
     for e in current_olymp.get_examiners():
-        if e.tg_id:
+        if e.external_id:
             try:
-                bot.send_message(e.tg_id, e_message)
+                bot.send_message(e.external_id, e_message)
                 receivers += 1
             except Exception as send_error:
                 err_amount += 1
@@ -562,11 +570,11 @@ def olymp_finish(message: Message):
     receivers = 0
     for p in participants:
         p.finished = True
-        if p.tg_id:
+        if p.external_id:
             try:
                 is_in_queue = p.queue_entry is not None
                 bot.send_message(
-                    p.tg_id,
+                    p.external_id,
                     p_in_queue_message if is_in_queue else p_not_in_queue_message,
                     reply_markup = None if is_in_queue else participant_keyboard_olymp_finished
                 )
@@ -586,9 +594,9 @@ def olymp_finish(message: Message):
                       "Если ты завершил(-а) проверку, и даже в статусе /free к тебе никто "
                       "не идёт — тогда можешь идти отдыхать")
         for e in examiners:
-            if e.tg_id:
+            if e.external_id:
                 try:
-                    bot.send_message(e.tg_id, e_message)
+                    bot.send_message(e.external_id, e_message)
                     receivers += 1
                 except Exception as send_error:
                     err_amount += 1
@@ -651,10 +659,10 @@ def upload_members(message: Message, required_key: str, key_description: str, me
     for _, m in member_table.iterrows():
         m["tg_handle"] = str(m["tg_handle"])
         old_user = None
-        if user := User.from_tg_handle(m["tg_handle"], no_error=True):
+        if user := User.from_handle(Platform.TELEGRAM, m["tg_handle"], no_error=True):
             if user.name != m["name"] or user.surname != m["surname"]:
                 old_user = user
-        if member := member_class.from_tg_handle(m["tg_handle"], current_olymp.id, no_error=True):
+        if member := member_class.from_handle(Platform.TELEGRAM, m["tg_handle"], current_olymp.id, no_error=True):
             value = member._additional_values[required_key]
             if value != m[required_key]:
                 old_user = member
@@ -680,9 +688,9 @@ def upload_members(message: Message, required_key: str, key_description: str, me
                              f"{key_description.format(old_user._additional_values[required_key])} "
                              f"→ {member.full_name}, "
                              f"{key_description.format(member._additional_values[required_key])} "
-                             f"({member.display_tg_handle()})")
+                             f"({member.display_handle()})")
             else:
-                response += f"\n- {old_user.full_name} → {member.full_name} ({member.display_tg_handle()})"
+                response += f"\n- {old_user.full_name} → {member.full_name} ({member.display_handle()})"
     response += (f"\nЧтобы просмотреть список {term_stem}{term_endings_gen[2]}, "
                  f"используй команду /list_{member_class.__name__.lower()}s")
     bot.send_message(message.chat.id, response)
@@ -764,18 +772,19 @@ def edit_member(
     :param member_class: Класс типа члена олимпиады
     :type member_class: Подкласс `OlympMember`
 
-    :param other_args: Возможные аргументы кроме `tg_handle`, `name` и `surname`.
-    Словарь, где ключ — ключ аргумента, а значение — кортеж русского названия и двух функций, `getter(member)` и `setter(member, value)`
+    :param other_args: Возможные аргументы кроме `handle`, `name` и `surname`.
+    Словарь, где ключ — ключ аргумента, а значение — кортеж русского названия и двух функций,
+    `getter(member)` и `setter(member, value)`
     :type other_args: {`str`: (`str`, `getter(member) -> str`, `setter(member, value)`)}
     """
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
-    possible_keys = ['tg_handle', 'name', 'surname'] + list(other_args.keys())
-    def tg_setter(member: OlympMember, value: str): member.tg_handle = value
-    other_args['tg_handle'] = (
-        'Телеграм-хэндл', 
-        lambda member: member.display_tg_handle(hide_id=True),
-        tg_setter
+    possible_keys = ['handle', 'name', 'surname'] + list(other_args.keys())
+    def handle_setter(member: OlympMember, value: str): member.handle = value
+    other_args['handle'] = (
+        'Хэндл',
+        lambda member: member.display_handle(hide_id=True),
+        handle_setter
     )
     def name_setter(member: OlympMember, value: str): member.name = value
     other_args['name'] = ('Имя', lambda member: member.name, name_setter)
@@ -789,14 +798,14 @@ def edit_member(
     if key not in possible_keys:
         raise UserError(syntax_hint)
     if key == 'grade': value = int(value)
-    member: OlympMember = member_class.from_tg_handle(tg_handle, current_olymp.id)
+    member: OlympMember = member_class.from_handle(Platform.TELEGRAM, tg_handle, current_olymp.id)
     old_value = other_args[key][1](member)
     other_args[key][2](member, value)
     change = f"{other_args[key][0]}: {old_value} → {value}"
     bot.send_message(message.chat.id, f"Данные участника {member} обновлены:\n" + change)
-    if member.tg_id:
+    if member.external_id:
         bot.send_message(
-            member.tg_id,
+            member.external_id,
             f"Твои данные обновлены:\n" + change + "\nПросмотреть информацию о себе можно при помощи команды /my_info"
         )
 
@@ -875,23 +884,23 @@ def set_tags(message: Message):
         err += ", ".join(not_found)
         raise UserError(err)
     tags = list(filter(lambda tag: tag.name in tags, current_tags))
-    user: User = User.from_tg_handle(tg_handle)
+    user: User = User.from_handle(Platform.TELEGRAM, tg_handle)
     user.set_tags(tags)
     user_response = "Твои тэги обновлены:\n"
     for tag in tags:
         user_response += f"- {tag}\n"
-    if user.tg_id:
-        bot.send_message(user.tg_id, user_response)
+    if user.external_id:
+        bot.send_message(user.external_id, user_response)
     bot.send_message(message.chat.id, f"Список тэгов пользователя {user} обновлён")
 
 
 @bot.message_handler(commands=['clear_tags'], roles=['owner'])
 def clear_tags(message: Message):
     tg_handle = get_arg(message, "Необходимо указать Телеграм-хэндл пользователя и тэги")
-    user: User = User.from_tg_handle(tg_handle)
+    user: User = User.from_handle(Platform.TELEGRAM, tg_handle)
     user.set_tags(None)
-    if user.tg_id:
-        bot.send_message(user.tg_id, "Твои тэги удалены")
+    if user.external_id:
+        bot.send_message(user.external_id, "Твои тэги удалены")
     bot.send_message(message.chat.id, f"Тэги пользователя {user} очищены")
 
 
@@ -909,7 +918,7 @@ def return_participant_to_queue(participant: Participant):
                                 f"Свободных принимающих пока нет, но бот напишет тебе, когда подходящий принимающий освободится")
         if PROMOTE_COMMANDS:
             participant_response += f"Чтобы покинуть очередь, используй команду /leave_queue"
-        bot.send_message(participant.tg_id, participant_response, reply_markup=participant_keyboard_in_queue)
+        bot.send_message(participant.external_id, participant_response, reply_markup=participant_keyboard_in_queue)
 
 
 @bot.message_handler(commands=['set_examiner_problems'], roles=['owner'])
@@ -922,13 +931,13 @@ def set_examiner_problems(message: Message):
         current_problems = set(map(lambda problem: problem.id, current_olymp.get_problems()))
         if not set(problems).issubset(current_problems):
             raise UserError("Можно назначать только задачи текущей олимпиады")
-    examiner: Examiner = Examiner.from_tg_handle(tg_handle, current_olymp.id)
+    examiner: Examiner = Examiner.from_handle(Platform.TELEGRAM, tg_handle, current_olymp.id)
     examiner.set_problems(problems)
     examiner_response = "Твой список задач обновлён:\n"
     for problem_id in problems:
         examiner_response += f"- {Problem.from_id(problem_id)}\n"
-    if examiner.tg_id:
-        bot.send_message(examiner.tg_id, examiner_response)
+    if examiner.external_id:
+        bot.send_message(examiner.external_id, examiner_response)
     bot.send_message(message.chat.id, f"Список задач принимающего {examiner} обновлён")
     queue_entry = examiner.queue_entry
     if queue_entry and queue_entry.problem_id not in examiner.problems:
@@ -936,7 +945,7 @@ def set_examiner_problems(message: Message):
         problem: Problem = Problem.from_id(queue_entry.problem_id)
         examiner.withdraw_from_queue_entry()
         bot.send_message(
-            examiner.tg_id,
+            examiner.external_id,
             f"Ты больше не можешь принимать задачу {problem}. "
             f"Бот снял тебя с приёма задачи у участника {participant.full_name}\n"
             f"❗️ Бот установил тебе статус \"занят(-а)\". Пожалуйста, используй команду /free, чтобы продолжить принимать задачи!",
@@ -971,7 +980,7 @@ def view_member(
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
     tg_handle = get_arg(message, "Необходимо указать Телеграм-хэндл " + member_name_gen)
-    member: OlympMember = member_class.from_tg_handle(tg_handle, current_olymp.id)
+    member: OlympMember = member_class.from_handle(Platform.TELEGRAM, tg_handle, current_olymp.id)
     response = (f"<strong>{member_name.capitalize()} <code>{member.id}</code>:</strong>\n"
                 + member.display_data(verbose=True, olymp_status=current_olymp.status, technical_info=True, contact_note=False))
     bot.send_message(message.chat.id, response)
@@ -1108,7 +1117,9 @@ def olymp_info(message: Message):
 )
 def last_queue_entries(message: Message):
     syntax_hint = ("Синтаксис команды: <code>"
-                   + escape_html("/last_queue_entries [participant=<tg-хэндл>] [examiner=<tg-хэндл>] [problem=<ID>] [limit=<ограничение>]")
+                   + escape_html(
+                       "/last_queue_entries [participant=<tg-хэндл>] [examiner=<tg-хэндл>] [problem=<ID>] [limit=<ограничение>]"
+                       )
                    + "</code>")
     args = get_n_args(message, 0, 4, syntax_hint)
     settings = {}
@@ -1122,8 +1133,8 @@ def last_queue_entries(message: Message):
         match key:
             case 'limit': value = int(value)
             case 'problem': value = Problem.from_id(value)
-            case 'participant': value = Participant.from_tg_handle(value, current_olymp.id)
-            case 'examiner': value = Examiner.from_tg_handle(value, current_olymp.id)
+            case 'participant': value = Participant.from_handle(Platform.TELEGRAM, value, current_olymp.id)
+            case 'examiner': value = Examiner.from_handle(Platform.TELEGRAM, value, current_olymp.id)
         settings[key] = value
     limit = settings.get('limit', 10)
     chosen_participant: Participant | None = settings.get('participant')
@@ -1138,7 +1149,10 @@ def last_queue_entries(message: Message):
     response = f"Записи в очереди:\n"
     for queue_entry in queue_entries:
         participant: Participant = chosen_participant or Participant.from_id(queue_entry.participant_id)
-        examiner: Examiner | None = chosen_examiner or (Examiner.from_id(queue_entry.examiner_id) if queue_entry.examiner_id else None)
+        examiner: Examiner | None = (
+            chosen_examiner
+            or (Examiner.from_id(queue_entry.examiner_id) if queue_entry.examiner_id else None)
+        )
         problem: Problem = chosen_problem or Problem.from_id(queue_entry.problem_id)
         response += (f"ЗАПИСЬ <code>{queue_entry.id}</code>\n"
                      f"- <strong>Участник:</strong> {participant} ({participant.grade} класс)\n")
@@ -1174,7 +1188,7 @@ def update_queue_entry_status(message: Message):
     if message.reply_to_message:
         message_to_send = message.reply_to_message
         participant: Participant = Participant.from_id(queue_entry.participant_id)
-        bot.copy_message(participant.tg_id, message_to_send.chat.id, message_to_send.id)
+        bot.copy_message(participant.external_id, message_to_send.chat.id, message_to_send.id)
     announce_queue_entry(queue_entry)
     bot.send_message(message.chat.id, "Запись обновлена")
 
@@ -1210,17 +1224,17 @@ def update_queue_entry_problem(message: Message):
     if message.reply_to_message:
         message_to_send = message.reply_to_message
         participant: Participant = Participant.from_id(queue_entry.participant_id)
-        bot.copy_message(participant.tg_id, message_to_send.chat.id, message_to_send.id)
+        bot.copy_message(participant.external_id, message_to_send.chat.id, message_to_send.id)
     if queue_entry.status == QueueStatus.DISCUSSING:
         examiner: Examiner = Examiner.from_id(queue_entry.examiner_id)
         if problem_id in examiner.problems:
             bot.send_message(
-                examiner.tg_id,
+                examiner.external_id,
                 f"Участнику {participant.full_name} сменили задачу на {problem}. Обсуждайте её!"
             )
             problem_number = participant.get_problem_number(problem)
             bot.send_message(
-                participant.tg_id,
+                participant.external_id,
                 f"Задачу {problem_number}: {problem} у тебя примет тот же принимающий, "
                 f"{examiner.full_name}, по ссылке {examiner.conference_link}"
             )
@@ -1229,7 +1243,7 @@ def update_queue_entry_problem(message: Message):
         queue_entry.examiner_id = None
         examiner.is_busy = True
         bot.send_message(
-            examiner.tg_id,
+            examiner.external_id,
             f"Участнику {participant.full_name} сменили задачу на задачу, которую ты не принимаешь\n"
             f"❗️ Бот установил тебе статус \"занят(-а)\". Пожалуйста, используй команду /free, чтобы продолжить принимать задачи!",
             reply_markup=ReplyKeyboardRemove()
@@ -1520,7 +1534,7 @@ def delete_block_handler(callback_query: CallbackQuery):
 
 @bot.message_handler(commands=['choose_problems'], roles=['examiner'], olymp_statuses=[OlympStatus.REGISTRATION])
 def examiner_problems(message: Message, state: StateContext):
-    examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
+    examiner: Examiner = Examiner.from_external_id(Platform.TELEGRAM, message.from_user.id, current_olymp.id)
     response = "Выбери задачу, чтобы добавить её в свой список задач или убрать её из него\n" + examiner.display_problem_data()
     all_problems = current_olymp.get_problems(sort=True)
     reply_buttons = ReplyKeyboardMarkup(resize_keyboard=True)
@@ -1544,7 +1558,7 @@ def examiner_chooses_problem(message: Message, state: StateContext):
         bot.send_message(message.chat.id, "Выбор сохранён", reply_markup=ReplyKeyboardRemove())
         return
     problem = Problem.from_name(message.text, current_olymp.id)
-    examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
+    examiner: Examiner = Examiner.from_external_id(Platform.TELEGRAM, message.from_user.id, current_olymp.id)
     if problem.id in examiner.problems:
         examiner.remove_problem(problem)
         response = f"Задача {problem} удалена из твоего списка задач"
@@ -1560,7 +1574,7 @@ def examiner_chooses_problem(message: Message, state: StateContext):
     olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE], discussing_examiner=False
 )
 def examiner_busyness_status(message: Message):
-    examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
+    examiner: Examiner = Examiner.from_external_id(Platform.TELEGRAM, message.from_user.id, current_olymp.id)
     command = extract_command(message.text)
     if command == 'free' and not examiner.is_busy:
         raise UserError("Ты уже свободен(-на). Если хочешь отметить, что ты занят(-а), используй команду /busy")
@@ -1597,7 +1611,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
                         f"Свободных принимающих пока нет, но бот напишет тебе, когда подходящий принимающий освободится")
             if PROMOTE_COMMANDS:
                 response += f"\nЧтобы покинуть очередь, используй команду /leave_queue"
-            bot.send_message(participant.tg_id, response, reply_markup=participant_keyboard_in_queue)
+            bot.send_message(participant.external_id, response, reply_markup=participant_keyboard_in_queue)
             return
         elif queue_entry.status == QueueStatus.CANCELED:
             if p_continues:
@@ -1610,7 +1624,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
             else:
                 response = "Ты больше не в очереди. Олимпиада завершена, можешь отправляться на заслуженный отдых"
                 keyboard = participant_keyboard_olymp_finished
-            bot.send_message(participant.tg_id, response, reply_markup=keyboard)
+            bot.send_message(participant.external_id, response, reply_markup=keyboard)
             if participant.finished and not current_olymp.unhandled_queue_left(finished=True):
                 finish_olymp()
             return
@@ -1651,7 +1665,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
                 participant_response += ("\n✅ У тебя не осталось задач, которые можно сдавать! Так что "
                                          "для тебя олимпиада завершена, можешь отправляться на заслуженный отдых")
                 participant.finished = True
-                bot.send_message(participant.tg_id, participant_response, reply_markup=participant_keyboard_olymp_finished)
+                bot.send_message(participant.external_id, participant_response, reply_markup=participant_keyboard_olymp_finished)
                 bot.send_message(OWNER_ID, f"Участник {participant} завершил олимпиаду!")
                 if current_olymp.participants_amount(finished=False) == 0:
                     finish_olymp()
@@ -1669,14 +1683,20 @@ def announce_queue_entry(queue_entry: QueueEntry):
             examiner_response += "\n❗️ Чтобы продолжить принимать задачи, используй команду /free"
         if new_problem_block:
             bot.send_document(
-                participant.tg_id, 
-                document=InputFile(new_problem_block.path or ProblemBlock.DEFAULT_PATH, f"Блок_{participant.last_block_number}.pdf"),
+                participant.external_id,
+                document=InputFile(
+                    new_problem_block.path or ProblemBlock.DEFAULT_PATH,
+                    f"Блок_{participant.last_block_number}.pdf"
+                ),
                 caption=participant_response,
                 reply_markup=keyboard
             )
         else:
-            bot.send_message(participant.tg_id, participant_response, reply_markup=keyboard)
-        bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove() if not examiner.queue_entry else None)
+            bot.send_message(participant.external_id, participant_response, reply_markup=keyboard)
+        bot.send_message(
+            examiner.external_id, examiner_response,
+            reply_markup=ReplyKeyboardRemove() if not examiner.queue_entry else None
+        )
         if participant.finished and not unhandled_queue_left:
             finish_olymp()
         return
@@ -1686,7 +1706,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
                             f"у тебя примет {examiner.full_name}.\n"
                             f"Ссылка: {examiner.conference_link}")
     bot.send_message(
-        participant.tg_id, 
+        participant.external_id,
         participant_response, 
         reply_markup=(quick_markup({'Принимающий не пришёл': {'callback_data': 'examiner_didnt_come'}})
                       if NO_EXAMINER_COMPLAINTS else ReplyKeyboardRemove())
@@ -1701,20 +1721,20 @@ def announce_queue_entry(queue_entry: QueueEntry):
                               "И <strong>не нажимай ни на какую из кнопок!</strong>")
     examiner_keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
     examiner_keyboard.add("Принято", "Не принято", "Отмена")
-    bot.send_message(examiner.tg_id, examiner_response, reply_markup=examiner_keyboard)
+    bot.send_message(examiner.external_id, examiner_response, reply_markup=examiner_keyboard)
 
 
 @bot.message_handler(commands=['withdraw_examiner'], roles=['owner'], olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE])
 def withdraw_examiner(message: Message):
     examiner_tg_handle = get_arg(message, no_arg_error="Необходимо указать хэндл принимающего")
-    examiner: Examiner = Examiner.from_tg_handle(examiner_tg_handle, current_olymp.id)
+    examiner: Examiner = Examiner.from_handle(Platform.TELEGRAM, examiner_tg_handle, current_olymp.id)
     participant: Participant = Participant.from_id(examiner.queue_entry.participant_id)
     examiner.withdraw_from_queue_entry()
     examiner_response = (f"{participant.full_name} пожаловался(-лась), что тебя не было на приёме задачи. "
                          f"Пожалуйста, используй команду /busy, если тебе надо отойти!\n"
                          f"❗️ Бот установил тебе статус \"занят(-а)\". "
                          f"Когда вернёшься, используй команду /free, чтобы продолжить принимать задачи")
-    bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
+    bot.send_message(examiner.external_id, examiner_response, reply_markup=ReplyKeyboardRemove())
     return_participant_to_queue(participant)
     bot.send_message(message.chat.id, f"Принимающий {examiner} снят с приёма задачи")
 
@@ -1733,7 +1753,7 @@ def examiner_didnt_come_handler(callback_query: CallbackQuery):
         bot.delete_message(message.chat.id, message.id)
         bot.answer_callback_query(callback_query.id, "Действие отменено")
         return
-    participant: Participant = Participant.from_tg_id(callback_query.from_user.id, current_olymp.id)
+    participant: Participant = Participant.from_external_id(Platform.TELEGRAM, callback_query.from_user.id, current_olymp.id)
     if not participant.queue_entry:
         raise UserError("Пожаловаться, что принимающий не пришёл, можно только при сдаче задачи")
     if participant.queue_entry.status != QueueStatus.DISCUSSING:
@@ -1754,7 +1774,7 @@ def examiner_didnt_come_handler(callback_query: CallbackQuery):
                          f"Пожалуйста, используй команду /busy, если тебе надо отойти!\n"
                          f"❗️ Бот установил тебе статус \"занят(-а)\". "
                          f"Когда вернёшься, используй команду /free, чтобы продолжить принимать задачи")
-    bot.send_message(examiner.tg_id, examiner_response, reply_markup=ReplyKeyboardRemove())
+    bot.send_message(examiner.external_id, examiner_response, reply_markup=ReplyKeyboardRemove())
     queue_entry = participant.queue_entry
     owner_message = (f"{participant} пожаловался(-лась), что принимающего {examiner} не было на приёме задачи "
                      f"(запись в очереди: <code>{queue_entry.id}</code>)")
@@ -1763,11 +1783,14 @@ def examiner_didnt_come_handler(callback_query: CallbackQuery):
     return_participant_to_queue(participant)
 
 
-@bot.message_handler(regexp=rf'(/queue( \d+)?|{JOIN_QUEUE_BUTTON})', roles=['participant'], olymp_statuses=[OlympStatus.CONTEST])
+@bot.message_handler(
+    regexp=rf'(/queue( \d+)?|{JOIN_QUEUE_BUTTON})',
+    roles=['participant'], olymp_statuses=[OlympStatus.CONTEST])
 def queue(message: Message):
-    participant: Participant = Participant.from_tg_id(message.from_user.id, current_olymp.id)
+    participant: Participant = Participant.from_external_id(Platform.TELEGRAM, message.from_user.id, current_olymp.id)
     if participant.finished:
-        if extract_command(message.text): raise UserError("Неизвестная команда", reply_markup=participant_keyboard_olymp_finished)
+        if extract_command(message.text):
+            raise UserError("Неизвестная команда", reply_markup=participant_keyboard_olymp_finished)
         return
     temp_reply = bot.send_message(message.chat.id, "Обработка запроса…", reply_markup=ReplyKeyboardRemove())
     if participant.queue_entry:
@@ -1785,7 +1808,10 @@ def queue(message: Message):
         join_queue(participant, problem_number)
         return
     bot.delete_message(temp_reply.chat.id, temp_reply.id)
-    bot.send_message(message.chat.id, "Выбери задачу для сдачи", reply_markup=participant_keyboard_choose_problem(participant))
+    bot.send_message(
+        message.chat.id, "Выбери задачу для сдачи",
+        reply_markup=participant_keyboard_choose_problem(participant)
+    )
 
 
 @bot.callback_query_handler(
@@ -1794,7 +1820,7 @@ def queue(message: Message):
 def join_queue_handler(callback_query: CallbackQuery):
     message = callback_query.message
     bot.delete_message(message.chat.id, message.id)
-    participant: Participant = Participant.from_tg_id(callback_query.from_user.id, current_olymp.id)
+    participant: Participant = Participant.from_external_id(Platform.TELEGRAM, callback_query.from_user.id, current_olymp.id)
     if callback_query.data.endswith('_cancel'):
         bot.send_message(
             message.chat.id, "Действие отменено", 
@@ -1815,7 +1841,10 @@ def join_queue_handler(callback_query: CallbackQuery):
 
 def join_queue(participant: Participant, problem_number: int):
     if participant.finished or current_olymp.status in [OlympStatus.QUEUE, OlympStatus.REGISTRATION]:
-        raise UserError("Олимпиада завершена, записываться на сдачу больше нельзя", reply_markup=participant_keyboard_olymp_finished)
+        raise UserError(
+            "Олимпиада завершена, записываться на сдачу больше нельзя",
+            reply_markup=participant_keyboard_olymp_finished
+        )
     problem = participant.problem_from_number(problem_number)
     if participant.attempts_left(problem) <= 0:
         raise UserError(f"У тебя не осталось попыток, чтобы сдать задачу {problem_number}: {problem}… "
@@ -1834,7 +1863,7 @@ def join_queue(participant: Participant, problem_number: int):
     olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE]
 )
 def leave_queue(message: Message):
-    participant: Participant = Participant.from_tg_id(message.from_user.id, current_olymp.id)
+    participant: Participant = Participant.from_external_id(Platform.TELEGRAM, message.from_user.id, current_olymp.id)
     queue_entry = participant.queue_entry
     if not queue_entry:
         if participant.finished:
@@ -1871,7 +1900,7 @@ def leave_queue(message: Message):
 def leave_queue_handler(callback_query: CallbackQuery):
     message = callback_query.message
     bot.delete_message(message.chat.id, message.id)
-    participant: Participant = Participant.from_tg_id(callback_query.from_user.id, current_olymp.id)
+    participant: Participant = Participant.from_external_id(Platform.TELEGRAM, callback_query.from_user.id, current_olymp.id)
     if callback_query.data.endswith('_cancel'):
         bot.send_message(
             message.chat.id, "Действие отменено",
@@ -1893,7 +1922,9 @@ def leave_queue_handler(callback_query: CallbackQuery):
     announce_queue_entry(queue_entry)
 
 
-@bot.message_handler(commands=['give_out_second_block', 'give_out_third_block'], roles=['owner'], olymp_statuses=[OlympStatus.CONTEST])
+@bot.message_handler(
+    commands=['give_out_second_block', 'give_out_third_block'], roles=['owner'],
+    olymp_statuses=[OlympStatus.CONTEST])
 def give_out_problem_block(message: Message):
     command = extract_command(message.text)
     new_problem_block_number = 2 if command == 'give_out_second_block' else 3
@@ -1909,16 +1940,18 @@ def give_out_problem_block(message: Message):
         if last_block_number < new_problem_block_number:
             receivers += 1
             new_problem_block = p.give_next_problem_block()
-            if p.tg_id:
-                participant_reply = (f"Тебе выдан {'второй' if last_block_number + 1 == 2 else 'завершающий третий'} блок задач. "
-                                     f"Теперь можешь решать и сдавать их тоже!")
+            if p.external_id:
+                participant_reply = (
+                    f"Тебе выдан {'второй' if last_block_number + 1 == 2 else 'завершающий третий'} блок задач. "
+                    f"Теперь можешь решать и сдавать их тоже!"
+                )
                 if PROMOTE_COMMANDS:
                     participant_reply += (f"\nЧтобы записаться на сдачу задачи, используй команду <code>"
                                           + escape_html("/queue <номер задачи>")
                                           + "</code>")
                 try:
                     bot.send_document(
-                        p.tg_id,
+                        p.external_id,
                         InputFile(new_problem_block.path or ProblemBlock.DEFAULT_PATH, f"Блок_{last_block_number + 1}.pdf"),
                         caption=participant_reply
                     )
@@ -1946,7 +1979,7 @@ def give_problem_block(message: Message):
     command = extract_command(message.text)
     new_problem_block_number = 2 if command == 'give_second_block' else 3
     arg = get_arg(message, "Необходимо указать хэндл участника")
-    participant: Participant = Participant.from_tg_handle(arg, current_olymp.id)
+    participant: Participant = Participant.from_handle(Platform.TELEGRAM, arg, current_olymp.id)
     if participant.finished:
         raise UserError(f"Участник {participant.full_name} завершил участие, ему нельзя выдавать новые блоки задач")
     if participant.last_block_number != new_problem_block_number - 1:
@@ -1959,7 +1992,7 @@ def give_problem_block(message: Message):
                               + escape_html("/queue <номер задачи>")
                               + "</code>")
     bot.send_document(
-        participant.tg_id,
+        participant.external_id,
         InputFile(problem_block.path or ProblemBlock.DEFAULT_PATH, f"Блок_{participant.last_block_number}.pdf"),
         caption=participant_reply
     )
@@ -1980,10 +2013,10 @@ def send_command(message: Message):
     command = extract_command(message.text)
     member_class = Participant if command == 'send_to_participant' else Examiner
     member_class_name = "Участник" if command == 'send_to_participant' else "Принимающий"
-    member: Participant | Examiner = member_class.from_tg_handle(tg_handle, current_olymp.id)
-    if not member.tg_id:
+    member: Participant | Examiner = member_class.from_handle(Platform.TELEGRAM, tg_handle, current_olymp.id)
+    if not member.external_id:
         raise UserError(f"{member} не авторизован(-а). Невозможно переслать сообщение…")
-    bot.copy_message(member.tg_id, message_to_send.chat.id, message_to_send.id)
+    bot.copy_message(member.external_id, message_to_send.chat.id, message_to_send.id)
     bot.send_message(
         message.chat.id,
         f"{member_class_name} {member} получил оповещение!",
@@ -2008,9 +2041,9 @@ def announce_command(message: Message):
     err_amount = 0
     if send_to_participants:
         for p in current_olymp.get_participants(include_tags=include_tags, exclude_tags=exclude_tags):
-            if p.tg_id:
+            if p.external_id:
                 try:
-                    bot.copy_message(p.tg_id, announcement.chat.id, announcement.id)
+                    bot.copy_message(p.external_id, announcement.chat.id, announcement.id)
                     p_amount += 1
                 except Exception as send_error:
                     err_amount += 1
@@ -2019,9 +2052,9 @@ def announce_command(message: Message):
         owner_response += " и "
     if send_to_examiners:
         for e in current_olymp.get_examiners(include_tags=include_tags, exclude_tags=exclude_tags):
-            if e.tg_id:
+            if e.external_id:
                 try:
-                    bot.copy_message(e.tg_id, announcement.chat.id, announcement.id)
+                    bot.copy_message(e.external_id, announcement.chat.id, announcement.id)
                     e_amount += 1
                 except Exception as send_error:
                     err_amount += 1
@@ -2057,8 +2090,10 @@ def results_command(message: Message):
         for _, successful, number in problem_results:
             row.append(number if successful else 0)
         row.append(sum)
-        if participant.is_junior: junior_table = pd.concat([junior_table, pd.DataFrame([row], columns=COLUMNS.keys())], ignore_index=True)
-        else:                     senior_table = pd.concat([senior_table, pd.DataFrame([row], columns=COLUMNS.keys())], ignore_index=True)
+        if participant.is_junior: junior_table = pd.concat([junior_table, pd.DataFrame([row], columns=COLUMNS.keys())],
+                                                           ignore_index=True)
+        else:                     senior_table = pd.concat([senior_table, pd.DataFrame([row], columns=COLUMNS.keys())],
+                                                           ignore_index=True)
     dir = "created_files"
     Path(dir).mkdir(exist_ok=True)
     excel_path = os.path.join("created_files", f"results_{current_olymp.id}.xlsx")
@@ -2092,7 +2127,7 @@ def examiner_buttons_callback(message: Message):
     if not result_status or result_status in QueueStatus.active():
         bot.send_message(message.chat.id, "Выбери результат сдачи на клавиатуре")
         return
-    examiner: Examiner = Examiner.from_tg_id(message.from_user.id, current_olymp.id)
+    examiner: Examiner = Examiner.from_external_id(Platform.TELEGRAM, message.from_user.id, current_olymp.id)
     queue_entry: QueueEntry = examiner.queue_entry
     queue_entry.status = result_status
     announce_queue_entry(queue_entry)
@@ -2109,7 +2144,7 @@ def other_messages(message: Message):
     elif current_olymp.status == OlympStatus.REGISTRATION:
         refer_to_people = True
     elif (current_olymp.status in [OlympStatus.CONTEST, OlympStatus.QUEUE]
-          and (p := Participant.from_tg_id(message.from_user.id, current_olymp.id, no_error=True))
+          and (p := Participant.from_external_id(Platform.TELEGRAM, message.from_user.id, current_olymp.id, no_error=True))
           and (p.queue_entry or not p.finished)):
         refer_to_people = True
     else:

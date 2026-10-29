@@ -46,6 +46,16 @@ class QueueStatus(SqliteCompatibleEnum):
         return self.__DESCRIPTIONS[self.value].capitalize()
 
 
+class Platform(SqliteCompatibleEnum):
+    TELEGRAM = 0
+    VK = 1
+
+    __NAMES = ["Телеграм", "ВКонтакте"]
+
+    def __str__(self) -> str:
+        return self.__NAMES[self.value]
+
+
 class BlockType(SqliteCompatibleEnum):
     JUNIOR_1 = 0
     JUNIOR_2 = 1

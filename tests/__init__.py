@@ -3,9 +3,7 @@
 import atexit
 import os
 import shutil
-import sqlite3
 import unittest
-import warnings
 from configparser import ConfigParser
 
 # Тесты работают с отдельной базой и отдельным конфигом, чтобы не трогать рабочие файлы.
@@ -44,16 +42,12 @@ class DatabaseTestCase(unittest.TestCase):
     """Тест с чистой базой данных перед каждым тестом"""
 
     def setUp(self):
-        # Приложение пока не закрывает соединения с SQLite явно — это отдельная задача,
-        # поэтому не засоряем вывод тестов предупреждениями о них
-        # warnings.filterwarnings("ignore", category=ResourceWarning, message="unclosed database")
-        # Страховка: тесты не должны случайно очистить рабочую базу
         test_database = os.environ.get("OLYMP_DB")
         if not test_database or os.path.abspath(db._DATABASE_DEFAULT) == os.path.abspath(test_database):
-            raise RuntimeError("Тесты должны использовать отдельную базу данных (OLYMP_DB)")
+            raise RuntimeError("Тестовая база не должна совпадать с рабочей базой")
         if not os.path.exists(db.DATABASE):
             db.create_update_db()
-        with sqlite3.connect(db.DATABASE) as conn:
+        with db.db_connection() as conn:
             cur = conn.cursor()
             for table in (
                 "user_tags", "examiner_problems", "queue", "participants",
