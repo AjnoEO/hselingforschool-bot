@@ -36,6 +36,12 @@ CREATE TABLE IF NOT EXISTS `users` (
 	UNIQUE (`platform`, `handle`),
 	FOREIGN KEY(`platform`) REFERENCES `platforms`(`id`)
 );
+CREATE TABLE IF NOT EXISTS `conversation_states` (
+	`platform` INTEGER NOT NULL,
+	`peer_id` INTEGER NOT NULL,
+	`state` TEXT NOT NULL,
+	PRIMARY KEY (`platform`, `peer_id`)
+);
 CREATE TABLE IF NOT EXISTS `user_tags` (
     `user_id` integer NOT NULL,
     `tag_id` integer NOT NULL,

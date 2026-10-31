@@ -1,5 +1,6 @@
 import os
 from configparser import ConfigParser
+from enums import Platform
 
 # Путь к конфигу можно переопределить переменной окружения (используется в тестах)
 CONFIG_FILE = os.environ.get("OLYMP_CONFIG", "config.ini")
@@ -16,6 +17,8 @@ __data = __config["data"]
 TOKEN = __data["token"]
 OWNER_ID = int(__data["owner_id"])
 OWNER_HANDLE = __data["owner_handle"]
+__owner_platform = __data.get("owner_platform", "TELEGRAM").split("#", 1)[0].strip().upper()
+OWNER_PLATFORM = Platform[__owner_platform] if __owner_platform in Platform.__members__ else Platform(int(__owner_platform))
 
 __bot = __config["bot"]
 PROMOTE_COMMANDS = __bot.getboolean("promote_commands")

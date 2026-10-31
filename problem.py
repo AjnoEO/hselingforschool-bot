@@ -3,8 +3,7 @@ from enums import BlockType
 from sqlite3 import Cursor
 from data import PREDEFINED_PATH
 from db import db_connection
-from utils import UserError, update_in_table, provide_cursor, decline
-from telebot.formatting import escape_html
+from utils import UserError, update_in_table, provide_cursor, decline, escape_html
 
 class Problem:
     def __init__(

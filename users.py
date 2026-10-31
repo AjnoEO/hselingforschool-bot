@@ -1,12 +1,11 @@
 from sqlite3 import Cursor
 from db import db_connection
-from utils import UserError, decline, provide_cursor, value_exists, update_in_table
+from utils import UserError, decline, escape_html, provide_cursor, value_exists, update_in_table
 from tag import Tag
 from enums import OlympStatus, Platform
 from queue_entry import QueueEntry, QueueStatus
 from problem import Problem, ProblemBlock, BlockType
 from data import OWNER_HANDLE
-from telebot.formatting import escape_html
 
 
 class User:

@@ -45,6 +45,8 @@ class DatabaseTestCase(unittest.TestCase):
         test_database = os.environ.get("OLYMP_DB")
         if not test_database or os.path.abspath(db._DATABASE_DEFAULT) == os.path.abspath(test_database):
             raise RuntimeError("Тестовая база не должна совпадать с рабочей базой")
+        if os.path.abspath(test_database) != os.path.abspath(db.DATABASE):
+            raise RuntimeError("db.DATABASE должно определить тестовую базу из переменной среды")
         if not os.path.exists(db.DATABASE):
             db.create_update_db()
         with db.db_connection() as conn:

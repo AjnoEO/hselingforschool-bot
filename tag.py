@@ -1,7 +1,6 @@
 from sqlite3 import Cursor
 from db import db_connection
-from utils import UserError, update_in_table, provide_cursor
-from telebot.formatting import escape_html
+from utils import UserError, update_in_table, provide_cursor, escape_html
 
 class Tag:
     def __init__(
