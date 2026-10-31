@@ -1,14 +1,17 @@
 import os
 from pathlib import Path
 import re
+import threading
 from typing import Callable
 import json
 import traceback
 from db import create_update_db
 from data import (
-    TOKEN, OWNER_ID, OWNER_PLATFORM, OWNER_HANDLE, BUTTONS_IMG,
+    TELEGRAM_TOKEN, VK_TOKEN, VK_GROUP_ID, VK_ENABLED,
+    OWNER_ID, OWNER_PLATFORM, OWNER_HANDLES, BUTTONS_IMG,
     PROMOTE_COMMANDS, NO_EXAMINER_COMPLAINTS, MEMBER_PAGE_SIZE, ASK_PEOPLE_HANDLES,
 )
+from enums import Platform
 from olymp import Olymp, OlympStatus
 from messaging import (
     Button, Context, ConversationState, Keyboard, Media, MessageRef, Event,
@@ -71,17 +74,21 @@ def build_context(event: Event):
     )
 
 
+dispatch_lock = threading.Lock()
+
+
 def handle_event(event):
     ctx = build_context(event)
     handler = router.match(ctx)
     if handler is None:
         return
     try:
-        handler(ctx)
+        with dispatch_lock:
+            handler(ctx)
     except UserError as exc:
         error_message = "\u26a0\ufe0f Ошибка!\n" + str(exc)
         if not ctx.is_owner and exc.contact_note:
-            error_message += f"\nЕсли тебе кажется, что это баг, сообщи {OWNER_HANDLE}"
+            error_message += f"\nЕсли тебе кажется, что это баг, сообщи {OWNER_HANDLES[ctx.platform]}"
         ctx.messenger.send_text(ctx.peer_id, error_message, keyboard=exc.reply_markup)
     except Exception as exc:
         tb = traceback.extract_tb(exc.__traceback__)[-1]
@@ -92,10 +99,46 @@ def handle_event(event):
             f"{' '.join([escape_html(str(arg)) for arg in exc.args])}</code>"
         )
         if not ctx.is_owner:
-            error_message += f"\nЕсли тебе кажется, что это баг, сообщи {OWNER_HANDLE}"
+            error_message += f"\nЕсли тебе кажется, что это баг, сообщи {OWNER_HANDLES[ctx.platform]}"
         print(exc)
         ctx.messenger.send_text(ctx.peer_id, error_message)
         raise
+
+# TODO: Унести всё это добро в другой файл?
+def parse_identity_arg(arg: str) -> tuple[Platform, str]:
+    arg = arg.strip()
+    no_messenger_error = UserError(f"Требуется указать мессенджер ({', '.join([p.code for p in Platform])})")
+    if not "@" in arg:
+        raise no_messenger_error
+    prefix, handle = arg.split("@", 1)
+    if not prefix:
+        raise no_messenger_error
+    try:
+        platform = Platform.from_code(prefix)
+    except KeyError:
+        raise UserError(f"Неизвестный мессенджер: {prefix}")
+    handle = User.conform_handle(handle)
+    if not handle:
+        raise UserError("Необходимо указать хэндл пользователя")
+    return platform, handle
+
+
+def resolve_user(arg: str, no_error: bool = False):
+    platform, handle = parse_identity_arg(arg)
+    if handle.isnumeric():
+        user = User.from_external_id(platform, int(handle), no_error=True)
+        if user:
+            return user
+    return User.from_handle(platform, handle, no_error=no_error)
+
+
+def resolve_member(arg: str, member_class: type[OlympMember], olymp_id: int, no_error: bool = False):
+    platform, handle = parse_identity_arg(arg)
+    if handle.isnumeric():
+        member = member_class.from_external_id(platform, int(handle), olymp_id, no_error=True)
+        if member:
+            return member
+    return member_class.from_handle(platform, handle, olymp_id, no_error=no_error)
 
 
 def get_document(ctx: Context, no_file_error: str, expected_type: str | None = None) -> bytes:
@@ -140,7 +183,7 @@ def lost(ctx: Context):
     response = ("Привет! Я бот для проведения <strong>Устной олимпиады по лингвистике (УОЛ)</strong>\n"
                 "Пока что олимпиады нет. О регистрации на олимпиаду и дате её начала "
                 "мы объявляем в каналах УОЛ и Лингвокружка:\n"
-                "- ВКонтакте: vk.com/hseling.for.school\n"
+                "- ВКонтакте: vk.ru/hseling.for.school\n"
                 "- Телеграм: t.me/hselingforschool\n"
                 "- Сайт: ling.hse.ru/junior\n"
                 "Подписывайся и ожидай информации там")
@@ -194,7 +237,7 @@ def send_welcome(ctx: Context):
         send_authentication_confirmation(new_member)
         return
     
-    ctx.reply(f"Пользователь не найден. Если ты регистрировался(-лась) на олимпиаду, напиши {OWNER_HANDLE}")
+    ctx.reply(f"Пользователь не найден. Если ты регистрировался(-лась) на олимпиаду, напиши {OWNER_HANDLES[ctx.platform]}")
 
 
 @router.callback(prefix='handle_changed_')
@@ -202,7 +245,7 @@ def handle_change_handler(ctx: Context):
     handle_changed = ctx.data.endswith('_yes')
     ctx.edit_keyboard(None)
     if not handle_changed:
-        ctx.reply(f"Что-то пошло не так. Напиши {OWNER_HANDLE}")
+        ctx.reply(f"Что-то пошло не так. Напиши {OWNER_HANDLES[ctx.platform]}")
         return
     old_user = User.from_external_id(ctx.platform, ctx.sender_id)
     new_user = User.from_handle(ctx.platform, ctx.sender_handle)
@@ -229,7 +272,7 @@ def send_authentication_confirmation(member: OlympMember, *, already_authenticat
         response += ("\nЧтобы просмотреть информацию о себе, используй команду /my_info"
                      "\nПолный список команд: /help")
     elif current_olymp.status == OlympStatus.REGISTRATION:
-        response += ("\n\nДата и время начала олимпиады есть в <a href=\"vk.com/hseling.for.school\">нашей группе ВКонтакте</a> "
+        response += ("\n\nДата и время начала олимпиады есть в <a href=\"vk.ru/hseling.for.school\">нашей группе ВКонтакте</a> "
                      "и в <a href=\"t.me/hselingforschool\">нашем Телеграм-канале</a>\n"
                      "Когда олимпиада начнётся, бот пришлёт тебе задания и ты сможешь записываться на сдачу задач через него")
     else:
@@ -320,7 +363,7 @@ def participant_info(ctx: Context):
                 f"{participant.display_data(contact_note=False)}")
     if current_olymp.status != OlympStatus.REGISTRATION:
         response += "\nПросмотреть информацию о сданных задачах можно при помощи команды /my_stats"
-    response += f"\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLE}"
+    response += f"\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLES[ctx.platform]}"
     ctx.reply(response)
 
 
@@ -370,12 +413,14 @@ def start_olymp():
         raise UserError("Олимпиада уже идёт или завершилась")
     current_olymp.status = OlympStatus.CONTEST
     participants = current_olymp.get_participants()
-    participant_message = (f"Олимпиада началась! Можешь приступать к решению задач\n"
-                           f"Если у тебя возникли вопросы, обращайся к "
-                           f"{' или '.join(ASK_PEOPLE_HANDLES)} (организационные вопросы) "
-                           f"или к {OWNER_HANDLE} (функционирование бота)")
+    def participant_start_message(platform):
+        return (f"Олимпиада началась! Можешь приступать к решению задач\n"
+                f"Если у тебя возникли вопросы, обращайся к "
+                f"{' или '.join(ASK_PEOPLE_HANDLES.get(platform, []))} (организационные вопросы) "
+                f"или к {OWNER_HANDLES[platform]} (функционирование бота)")
     err_amount = 0
     receivers = 0
+    send_error = None
     for p in participants:
         if p.external_id:
             try:
@@ -390,11 +435,12 @@ def start_olymp():
                 notifier.notify_document(
                     p,
                     Media(problem_block.path or ProblemBlock.DEFAULT_PATH, filename="Блок_1.pdf"),
-                    caption=participant_message
+                    caption=participant_start_message(p.platform)
                 )
                 receivers += 1
-            except Exception as send_error:
+            except Exception as exc:
                 err_amount += 1
+                send_error = exc
     examiners = current_olymp.get_examiners()
     for e in examiners:
         if e.external_id:
@@ -406,8 +452,9 @@ def start_olymp():
                     keyboard=REMOVE_KEYBOARD,
                 )
                 receivers += 1
-            except Exception as send_error:
+            except Exception as exc:
                 err_amount += 1
+                send_error = exc
     owner_message = f"Олимпиада <em>{current_olymp.name}</em> начата"
     if err_amount:
         owner_message += (
@@ -615,7 +662,7 @@ def upload_members(ctx: Context, required_key: str, key_description: str, member
         raise UserError("Нет текущей олимпиады")
     if current_olymp.status not in [OlympStatus.TBA, OlympStatus.REGISTRATION]:
         raise UserError("Олимпиада уже начата")
-    required_columns = ["name", "surname", "tg_handle", required_key]
+    required_columns = ["name", "surname", "platform", "handle", required_key]
     file_data = get_document(ctx, "Необходимо указать Excel-таблицу", ".xlsx")
     member_table = pd.read_excel(BytesIO(file_data))
     if not set(required_columns).issubset(set(member_table.columns)):
@@ -623,19 +670,21 @@ def upload_members(ctx: Context, required_key: str, key_description: str, member
     old_members_amount = 0
     updated_users: list[tuple[User | OlympMember, OlympMember]] = []
     for _, m in member_table.iterrows():
-        m["tg_handle"] = str(m["tg_handle"])
+        platform = Platform.from_code(m["platform"])
+        handle = m["handle"]
         old_user = None
-        if user := User.from_handle(ctx.platform, m["tg_handle"], no_error=True):
+        if user := User.from_handle(platform, handle, no_error=True):
             if user.name != m["name"] or user.surname != m["surname"]:
                 old_user = user
-        if member := member_class.from_handle(ctx.platform, m["tg_handle"], current_olymp.id, no_error=True):
+        if member := member_class.from_handle(platform, handle, current_olymp.id, no_error=True):
             value = member._additional_values[required_key]
             if value != m[required_key]:
                 old_user = member
             old_members_amount += 1
         member: OlympMember = member_class.create_as_new_user(
-            m['tg_handle'], m['name'], m['surname'], m[required_key], 
-            olymp_id=current_olymp.id, ok_if_user_exists=True, ok_if_exists=True
+            handle, m['name'], m['surname'], m[required_key],
+            olymp_id=current_olymp.id, platform=platform,
+            ok_if_user_exists=True, ok_if_exists=True
         )
         if old_user:
             updated_users.append((old_user, member))
@@ -682,12 +731,13 @@ def add_member(ctx: Context, min_args: int, max_args: int, no_arg_error: str,
                member_class: type[OlympMember], term_pl_gen: str, ok_if_exists: bool = False):
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
-    handle, name, surname, *other_args = get_n_args(
+    identity, name, surname, *other_args = get_n_args(
         ctx.text, min_args, max_args, no_arg_error
     )
+    platform, handle = parse_identity_arg(identity)
     other_args = additional_values_func(other_args)
     member: OlympMember = member_class.create_as_new_user(
-        handle, name, surname, olymp_id=current_olymp.id,
+        handle, name, surname, olymp_id=current_olymp.id, platform=platform,
         **other_args, ok_if_user_exists=True, ok_if_exists=ok_if_exists
     )
     ctx.reply(f"{member} добавлен(-а) в список {term_pl_gen}")
@@ -712,7 +762,7 @@ def add_member_command(ctx: Context):
 
 @router.message(commands=['add_test_members'], roles=['owner'])
 def add_test_members(ctx: Context):
-    ctx.text += f" @{ctx.sender_handle} OWNER OWNER"
+    ctx.text += f" {ctx.platform.code}@{ctx.sender_handle} OWNER OWNER"
     add_member(
         ctx, 3, 3, "",
         lambda _: {'grade': 8, 'last_block_number': None},
@@ -758,13 +808,13 @@ def edit_member(
     other_args['surname'] = ('Фамилия', lambda member: member.surname, surname_setter)
     command = extract_command(ctx.text)
     syntax_hint = ("Синтаксис команды: <code>"
-                   + escape_html("/" + command + " <хэндл> <" + "|".join(possible_keys) + "> <значение>")
+                   + escape_html("/" + command + " <messenger@handle> <" + "|".join(possible_keys) + "> <значение>")
                    + "</code>")
-    handle, key, value = get_n_args(ctx.text, 3, 3, syntax_hint)
+    identity, key, value = get_n_args(ctx.text, 3, 3, syntax_hint)
     if key not in possible_keys:
         raise UserError(syntax_hint)
     if key == 'grade': value = int(value)
-    member: OlympMember = member_class.from_handle(ctx.platform, handle, current_olymp.id)
+    member: OlympMember = resolve_member(identity, member_class, current_olymp.id)
     old_value = other_args[key][1](member)
     other_args[key][2](member, value)
     change = f"{other_args[key][0]}: {old_value} → {value}"
@@ -835,7 +885,7 @@ def list_tags(ctx: Context):
 
 @router.message(commands=['set_tags'], roles=['owner'])
 def set_tags(ctx: Context):
-    handle, tags = get_n_args(ctx.text, 2, 2, "Необходимо указать хэндл пользователя и тэги")
+    identity, tags = get_n_args(ctx.text, 2, 2, "Необходимо указать хэндл пользователя и тэги")
     tags = tags.split()
     current_tags = Tag.get_all()
     current_tag_ids = set(map(lambda tag: tag.name, current_tags))
@@ -848,7 +898,7 @@ def set_tags(ctx: Context):
         err += ", ".join(not_found)
         raise UserError(err)
     tags = list(filter(lambda tag: tag.name in tags, current_tags))
-    user: User = User.from_handle(ctx.platform, handle)
+    user: User = resolve_user(identity)
     user.set_tags(tags)
     user_response = "Твои тэги обновлены:\n"
     for tag in tags:
@@ -860,8 +910,8 @@ def set_tags(ctx: Context):
 
 @router.message(commands=['clear_tags'], roles=['owner'])
 def clear_tags(ctx: Context):
-    handle = get_arg(ctx.text, "Необходимо указать хэндл пользователя и тэги")
-    user: User = User.from_handle(ctx.platform, handle)
+    identity = get_arg(ctx.text, "Необходимо указать хэндл пользователя")
+    user: User = resolve_user(identity)
     user.set_tags(None)
     if user.external_id:
         notifier.notify(user, "Твои тэги удалены")
@@ -889,13 +939,13 @@ def return_participant_to_queue(participant: Participant):
 def set_examiner_problems(ctx: Context):
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
-    handle, problems = get_n_args(ctx.text, 2, 2, "Необходимо указать хэндл принимающего и задачи")
+    identity, problems = get_n_args(ctx.text, 2, 2, "Необходимо указать хэндл принимающего и задачи")
     problems = list(map(int, problems.split())) if problems[0] != '0' else None
     if problems:
         current_problems = set(map(lambda problem: problem.id, current_olymp.get_problems()))
         if not set(problems).issubset(current_problems):
             raise UserError("Можно назначать только задачи текущей олимпиады")
-    examiner: Examiner = Examiner.from_handle(ctx.platform, handle, current_olymp.id)
+    examiner: Examiner = resolve_member(identity, Examiner, current_olymp.id)
     examiner.set_problems(problems)
     examiner_response = "Твой список задач обновлён:\n"
     for problem_id in problems:
@@ -924,7 +974,7 @@ def set_examiner_problems(ctx: Context):
 
 
 def view_member(
-    ctx, member_class: type[OlympMember], member_name: str, member_name_gen: str
+    ctx: Context, member_class: type[OlympMember], member_name: str, member_name_gen: str
 ):
     """
     Просмотреть данные члена олимпиады
@@ -943,8 +993,8 @@ def view_member(
     """
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
-    handle = get_arg(ctx.text, "Необходимо указать хэндл " + member_name_gen)
-    member: OlympMember = member_class.from_handle(ctx.platform, handle, current_olymp.id)
+    identity = get_arg(ctx.text, "Необходимо указать хэндл " + member_name_gen)
+    member: OlympMember = resolve_member(identity, member_class, current_olymp.id)
     response = (f"<strong>{member_name.capitalize()} <code>{member.id}</code>:</strong>\n"
                 + member.display_data(verbose=True, olymp_status=current_olymp.status, technical_info=True, contact_note=False))
     ctx.reply(response)
@@ -1081,7 +1131,8 @@ def olymp_info(ctx: Context):
 def last_queue_entries(ctx: Context):
     syntax_hint = ("Синтаксис команды: <code>"
                    + escape_html(
-                       "/last_queue_entries [participant=<хэндл>] [examiner=<хэндл>] [problem=<ID>] [limit=<ограничение>]"
+                       "/last_queue_entries [participant=<messenger@handle>] [examiner=<messenger@handle>]"
+                       "[problem=<ID>] [limit=<ограничение>]"
                        )
                    + "</code>")
     args = get_n_args(ctx.text, 0, 4, syntax_hint)
@@ -1096,8 +1147,8 @@ def last_queue_entries(ctx: Context):
         match key:
             case 'limit': value = int(value)
             case 'problem': value = Problem.from_id(value)
-            case 'participant': value = Participant.from_handle(ctx.platform, value, current_olymp.id)
-            case 'examiner': value = Examiner.from_handle(ctx.platform, value, current_olymp.id)
+            case 'participant': value = resolve_member(value, Participant, current_olymp.id)
+            case 'examiner': value = resolve_member(value, Examiner, current_olymp.id)
         settings[key] = value
     limit = settings.get('limit', 10)
     chosen_participant: Participant | None = settings.get('participant')
@@ -1669,8 +1720,8 @@ def announce_queue_entry(queue_entry: QueueEntry):
     examiner_response += (f"Ты можешь принять или отклонить решение, а также отменить сдачу (например, если участник "
                           f"не пришёл или если ты не хочешь учитывать эту сдачу как потраченную попытку)")
     if current_olymp.status == OlympStatus.QUEUE or participant.finished:
-        examiner_response += (f"\n\nЕсли участник случайно нажал не на ту задачу, пожалуйста, напиши {OWNER_HANDLE}! "
-                              "И <strong>не нажимай ни на какую из кнопок!</strong>")
+        examiner_response += (f"\n\nЕсли участник случайно нажал не на ту задачу, пожалуйста, напиши "
+                              f"{OWNER_HANDLES[examiner.platform]}! И <strong>не нажимай ни на какую из кнопок!</strong>")
     examiner_keyboard = Keyboard()
     examiner_keyboard.row(Button("Принято"), Button("Не принято"), Button("Отмена"))
     notifier.notify(examiner, examiner_response, keyboard=examiner_keyboard)
@@ -1678,8 +1729,8 @@ def announce_queue_entry(queue_entry: QueueEntry):
 
 @router.message(commands=['withdraw_examiner'], roles=['owner'], olymp_statuses=[OlympStatus.CONTEST, OlympStatus.QUEUE])
 def withdraw_examiner(ctx: Context):
-    examiner_handle = get_arg(ctx.text, no_arg_error="Необходимо указать хэндл принимающего")
-    examiner: Examiner = Examiner.from_handle(ctx.platform, examiner_handle, current_olymp.id)
+    identity = get_arg(ctx.text, no_arg_error="Необходимо указать хэндл принимающего")
+    examiner: Examiner = resolve_member(identity, Examiner, current_olymp.id)
     participant: Participant = Participant.from_id(examiner.queue_entry.participant_id)
     examiner.withdraw_from_queue_entry()
     examiner_response = (f"{participant.full_name} пожаловался(-лась), что тебя не было на приёме задачи. "
@@ -1921,8 +1972,8 @@ def give_out_problem_block(ctx: Context):
 def give_problem_block(ctx: Context):
     command = extract_command(ctx.text)
     new_problem_block_number = 2 if command == 'give_second_block' else 3
-    arg = get_arg(ctx.text, "Необходимо указать хэндл участника")
-    participant: Participant = Participant.from_handle(ctx.platform, arg, current_olymp.id)
+    identity = get_arg(ctx.text, "Необходимо указать messenger@handle участника")
+    participant: Participant = resolve_member(identity, Participant, current_olymp.id)
     if participant.finished:
         raise UserError(f"Участник {participant.full_name} завершил участие, ему нельзя выдавать новые блоки задач")
     if participant.last_block_number != new_problem_block_number - 1:
@@ -1954,11 +2005,11 @@ def send_command(ctx: Context):
     message_to_send = ctx.reply_to
     if not message_to_send:
         raise UserError("Эту команду нужно использовать в ответ на сообщение")
-    handle = get_arg(ctx.text, "Необходимо указать хэндл пользователя")
+    identity = get_arg(ctx.text, "Необходимо указать хэндл пользователя")
     command = extract_command(ctx.text)
     member_class = Participant if command == 'send_to_participant' else Examiner
     member_class_name = "Участник" if command == 'send_to_participant' else "Принимающий"
-    member: Participant | Examiner = member_class.from_handle(ctx.platform, handle, current_olymp.id)
+    member: Participant | Examiner = resolve_member(identity, member_class, current_olymp.id)
     if not member.external_id:
         raise UserError(f"{member} не авторизован(-а). Невозможно переслать сообщение…")
     message_to_send_ref = message_to_send
@@ -2098,10 +2149,10 @@ def other_messages(ctx: Context):
     
     error_message = ("Неизвестная команда\n"
                      "Если у тебя есть организационные вопросы об олимпиаде, ")
-    if refer_to_people: error_message += f"пиши {' или '.join(ASK_PEOPLE_HANDLES)}\n"
-    else:               error_message += (f"пиши нам в <a href=\"vk.com/hseling.for.school\">группе ВКонтакте</a> "
+    if refer_to_people: error_message += f"пиши {' или '.join(ASK_PEOPLE_HANDLES.get(ctx.platform, []))}\n"
+    else:               error_message += (f"пиши нам в <a href=\"vk.ru/hseling.for.school\">группе ВКонтакте</a> "
                                           f"или в <a href=\"t.me/hselingforschool\">Телеграм-канале</a>\n")
-    error_message += f"Если у тебя есть вопросы по работе бота, пиши {OWNER_HANDLE}"
+    error_message += f"Если у тебя есть вопросы по работе бота, пиши {OWNER_HANDLES[ctx.platform]}"
 
     raise UserError(error_message, contact_note=False)
 
@@ -2113,8 +2164,16 @@ def main():
 
     from messaging.telegram_transport import TelegramTransport
 
-    transport = TelegramTransport(TOKEN, handle_event)
-    notifier.add(transport.messenger)
+    transports = []
+    if TELEGRAM_TOKEN:
+        telegram = TelegramTransport(TELEGRAM_TOKEN, handle_event)
+        notifier.add(telegram.messenger)
+        transports.append(telegram)
+    if VK_ENABLED:
+        from messaging.vk_transport import VkTransport
+        vk = VkTransport(VK_TOKEN, VK_GROUP_ID, handle_event)
+        notifier.add(vk.messenger)
+        transports.append(vk)
 
     print("Запускаю бота...")
 
@@ -2129,7 +2188,11 @@ def main():
     except Exception as e:
         print("! Не удалось оповестить владельца. Проверь owner_id в файле config.ini")
 
-    transport.start()
+    threads = [threading.Thread(target=transport.start, daemon=True) for transport in transports]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
 
 
 if __name__ == "__main__":

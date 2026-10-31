@@ -38,8 +38,8 @@ class Context: # TODO: Точно надо? Точно не слишком те�
         self.sender_id = event.sender_id if event is not None else None
         self.sender_handle = event.sender_handle if event is not None else None
 
-        self.peer_id = event.peer_id if isinstance(event, IncomingMessage) else None
-        self.message_id = event.message_id if isinstance(event, IncomingMessage) else None
+        self.peer_id = event.peer_id if event is not None else None
+        self.message_id = event.ref.message_id if event is not None else None
         self.text = event.text if isinstance(event, IncomingMessage) else None
         self.caption = event.caption if isinstance(event, IncomingMessage) else None
         self.content_type = event.content_type if isinstance(event, IncomingMessage) else None
@@ -154,7 +154,10 @@ class Context: # TODO: Точно надо? Точно не слишком те�
     def answer(self, text: str = "", show_alert: bool = False) -> None:
         if self.callback_id is None:
             raise ValueError("Контекст не связан с callback-запросом")
-        self.messenger.answer_callback(self.callback_id, text=text, show_alert=show_alert)
+        self.messenger.answer_callback(
+            self.callback_id, text=text, show_alert=show_alert,
+            user_id=self.sender_id, peer_id=self.peer_id,
+        )
 
     def copy_to(self, user, ref: MessageRef) -> MessageRef:
         return self.messengers.copy_message(user, ref)

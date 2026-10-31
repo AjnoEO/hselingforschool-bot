@@ -8,10 +8,12 @@ class Event:
     def __init__(
         self,
         platform: Platform,
+        peer_id: int,
         sender_id: int,
         sender_handle: str,  
     ):
         self.platform = platform
+        self.peer_id = peer_id
         self.sender_id = sender_id
         self.sender_handle = sender_handle
 
@@ -43,8 +45,7 @@ class IncomingMessage(Event):
         document: Document | None = None,
         reply_to: MessageRef | None = None,
     ):
-        super().__init__(platform, sender_id, sender_handle)
-        self.peer_id = peer_id
+        super().__init__(platform, peer_id, sender_id, sender_handle)
         self.message_id = message_id
         self.text = text
         self.caption = caption
@@ -73,11 +74,10 @@ class IncomingCallback(Event):
         data: str,
         ref: MessageRef,
     ):
-        super().__init__(platform, sender_id, sender_handle)
+        self._ref = ref
+        super().__init__(platform, ref.peer_id, sender_id, sender_handle)
         self.callback_id = callback_id
         self.data = data
-        self._ref = ref
-        self.peer_id = ref.peer_id
 
     @property
     def ref(self) -> MessageRef:

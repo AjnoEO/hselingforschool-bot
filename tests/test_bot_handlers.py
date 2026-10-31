@@ -39,7 +39,7 @@ class FakeMessenger:
     def delete(self, ref):
         self.calls.append(("delete", ref))
 
-    def answer_callback(self, callback_id, text="", show_alert=False):
+    def answer_callback(self, callback_id, text="", show_alert=False, *, user_id=None, peer_id=None):
         self.calls.append(("answer", callback_id, text, show_alert))
 
     def copy_message(self, peer_id, ref):

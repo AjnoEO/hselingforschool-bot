@@ -56,7 +56,8 @@ class Messenger:
     def delete(self, ref: MessageRef) -> None:
         raise NotImplementedError
 
-    def answer_callback(self, callback_id: str, text: str = "", show_alert: bool = False) -> None:
+    def answer_callback(self, callback_id: str, text: str = "", show_alert: bool = False,
+                        *, user_id: int | None = None, peer_id: int | None = None) -> None:
         raise NotImplementedError
 
     def copy_message(self, peer_id: int, ref: MessageRef) -> MessageRef:

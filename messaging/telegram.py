@@ -118,7 +118,8 @@ class TelegramMessenger(Messenger):
     def delete(self, ref: MessageRef) -> None:
         self.bot.delete_message(ref.peer_id, ref.message_id)
 
-    def answer_callback(self, callback_id: str, text: str = "", show_alert: bool = False) -> None:
+    def answer_callback(self, callback_id: str, text: str = "", show_alert: bool = False,
+                        *, user_id: int | None = None, peer_id: int | None = None) -> None:
         self.bot.answer_callback_query(callback_id, text=text, show_alert=show_alert)
 
     def copy_message(self, peer_id: int, ref: MessageRef) -> MessageRef:

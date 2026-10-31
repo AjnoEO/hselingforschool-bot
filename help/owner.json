@@ -5,11 +5,11 @@
             ["olymp_create <название>", "Создать олимпиаду"],
             [
                 "upload_participants", 
-                "Загрузить таблицу с участниками. Столбцы: <code>name</code>, <code>surname</code>, <code>grade</code>, <code>tg_handle</code>"
+                "Загрузить таблицу с участниками. Столбцы: <code>name</code>, <code>surname</code>, <code>grade</code>, <code>platform</code>, <code>handle</code>"
             ],
             [
                 "upload_examiners", 
-                "Загрузить таблицу с принимающими. Столбцы: <code>name</code>, <code>surname</code>, <code>conference_link</code>, <code>tg_handle</code>"
+                "Загрузить таблицу с принимающими. Столбцы: <code>name</code>, <code>surname</code>, <code>conference_link</code>, <code>platform</code>, <code>handle</code>"
             ],
             ["problem_create <название>", "Создать задачу. Можно перечислить несколько названий, каждое на своей строчке"],
             ["problem_rename <ID> <новое название>", "Переименовать задачу"],
@@ -46,27 +46,27 @@
             ["create_tag <код> <описание>", "Создать тэг"],
             ["edit_tag <код> <name|description> <значение>", "Изменить код или описание тэга"],
             ["list_tags", "Просмотреть список тэгов"],
-            ["set_tags <tg-хэндл> <тэг1 [тэг2] […]>", "Изменить набор тэгов пользователя"],
-            ["clear_tags <tg-хэндл>", "Очистить тэги пользователя"]
+            ["set_tags <messenger@handle> <тэг1 [тэг2] […]>", "Изменить набор тэгов пользователя"],
+            ["clear_tags <messenger@handle>", "Очистить тэги пользователя"]
         ],
         [
-            ["add_participant <tg-хэндл> <имя> <фамилия> <класс> [последний блок]", "Добавить участника вручную"],
-            ["edit_participant <tg-хэндл> <handle|name|surname|grade> <значение>", "Изменить информацию об участнике"],
-            ["view_participant <tg-хэндл>", "Просмотреть информацию об участнике"],
+            ["add_participant <messenger@handle> <имя> <фамилия> <класс> [последний блок]", "Добавить участника вручную"],
+            ["edit_participant <messenger@handle> <handle|name|surname|grade> <значение>", "Изменить информацию об участнике"],
+            ["view_participant <messenger@handle>", "Просмотреть информацию об участнике"],
             ["list_participants", "Просмотреть список участников олимпиады"],
-            ["give_second_block <tg-хэндл>", "Выдать участнику второй блок задач"], 
-            ["give_third_block <tg-хэндл>", "Выдать участник третий блок задач"],
-            ["send_to_participant <tg-хэндл>", "Отправить сообщение участнику"]
+            ["give_second_block <messenger@handle>", "Выдать участнику второй блок задач"],
+            ["give_third_block <messenger@handle>", "Выдать участник третий блок задач"],
+            ["send_to_participant <messenger@handle>", "Отправить сообщение участнику"]
         ],
         [
-            ["add_examiner <tg-хэндл> <имя> <фамилия> <ссылка на конференцию> <0|задача1 [задача2] […]>", "Добавить принимающего вручную"],
-            ["edit_examiner <tg-хэндл> <handle|name|surname|conference_link> <значение>", "Изменить информацию о принимающем"],
-            ["view_examiner <tg-хэндл>", "Просмотреть информацию о принимающем"],
+            ["add_examiner <messenger@handle> <имя> <фамилия> <ссылка на конференцию> <0|задача1 [задача2] […]>", "Добавить принимающего вручную"],
+            ["edit_examiner <messenger@handle> <handle|name|surname|conference_link> <значение>", "Изменить информацию о принимающем"],
+            ["view_examiner <messenger@handle>", "Просмотреть информацию о принимающем"],
             ["list_examiners", "Просмотреть список принимающих олимпиады"],
-            ["set_examiner_problems <tg-хэндл> <0|задача1 [задача2] […]>", "Изменить список задач принимающего"],
-            ["withdraw_examiner <tg-хэндл>", "Снять принимающего с назначенной записи в очередь и подобрать участнику нового принимающего"],
+            ["set_examiner_problems <messenger@handle> <0|задача1 [задача2] […]>", "Изменить список задач принимающего"],
+            ["withdraw_examiner <messenger@handle>", "Снять принимающего с назначенной записи в очередь и подобрать участнику нового принимающего"],
             [
-                "last_queue_entries [participant=<tg-хэндл>] [examiner=<tg-хэндл>] [problem=<ID>] [limit=<ограничение>]",
+                "last_queue_entries [participant=<messenger@handle>] [examiner=<messenger@handle>] [problem=<ID>] [limit=<ограничение>]",
                 "Показать последние записи в очереди (по умолчанию последние 10)"
             ],
             [
@@ -77,7 +77,7 @@
                 "update_queue_entry_problem <ID> <задача>", 
                 "Изменить задачу в записи в очереди. Пошли команду ответом на другое сообщение, чтобы послать это сообщение участнику"
             ],
-            ["send_to_examiner <tg-хэндл>", "Отправить сообщение принимающему"]
+            ["send_to_examiner <messenger@handle>", "Отправить сообщение принимающему"]
         ],
         [
             ["results", "Результаты олимпиады"],

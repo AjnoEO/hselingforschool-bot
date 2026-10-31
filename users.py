@@ -5,7 +5,7 @@ from tag import Tag
 from enums import OlympStatus, Platform
 from queue_entry import QueueEntry, QueueStatus
 from problem import Problem, ProblemBlock, BlockType
-from data import OWNER_HANDLE
+from data import OWNER_HANDLES
 
 
 class User:
@@ -184,10 +184,11 @@ class User:
     
 
     def display_handle(self, hide_id: bool = False) -> str:
-        return (
-            (f"Без хэндла" if hide_id else f"ID: <code>{self.handle}</code>") if self.handle.isnumeric()
-            else f"@{self.handle}"
-        )
+        if hide_id and self.handle.isnumeric():
+            return "Без хэндла"
+        label = escape_html(f"{self.platform.code}@{self.handle}")
+        url = escape_html(self.platform.direct_url(self.handle, self.external_id))
+        return f'<a href="{url}">{label}</a>'
     
     def display_tags(self, verbose: bool = False, hide_name: bool = True, sep: str = "\n", end: str = "") -> str:
         result = ""
@@ -597,7 +598,7 @@ class Participant(OlympMember):
                 if self.finished or olymp_status == OlympStatus.RESULTS else 
                 "\nУчаствует"
             )
-        if contact_note: response += f"\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLE}"
+        if contact_note: response += f"\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLES[self.platform]}"
         return response
     
     def problem_block_from_number(self, number: int):
@@ -924,7 +925,7 @@ class Examiner(OlympMember):
                 response += f"\nСтатус: {'занят(-а)' if self.is_busy else 'свободен(-на)'}"
             if olymp_status in [OlympStatus.CONTEST, OlympStatus.QUEUE, OlympStatus.RESULTS]:
                 response += f"\nОбсуждений с участниками: {self.busyness_level}"
-        if contact_note: response += f"\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLE}"
+        if contact_note: response += f"\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLES[self.platform]}"
         return response
     
     def assign_to_queue_entry(self, queue_entry: QueueEntry):
