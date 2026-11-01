@@ -1,6 +1,6 @@
 from enums import OlympStatus, QueueStatus
-import sqlite3
-from db import DATABASE
+from sqlite3 import Cursor
+from db import db_connection
 from tag import Tag
 from users import Participant, Examiner
 from problem import Problem, ProblemBlock
@@ -22,7 +22,7 @@ class Olymp:
 
     @classmethod
     def from_name(cls, name: str):
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT * FROM olymps WHERE name = ?", (name,))
             fetch = cur.fetchone()
@@ -38,7 +38,7 @@ class Olymp:
         name: str,
         status: OlympStatus = OlympStatus.TBA,
         *,
-        cursor: sqlite3.Cursor | None = None,
+        cursor: Cursor | None = None,
     ):
         """
         Добавить год в таблицу olymps
@@ -55,7 +55,7 @@ class Olymp:
 
     @classmethod
     @provide_cursor
-    def current(cls, *, cursor: sqlite3.Cursor | None = None):
+    def current(cls, *, cursor: Cursor | None = None):
         cursor.execute("SELECT * FROM olymps WHERE status != ?", (OlympStatus.RESULTS,))
         fetch = cursor.fetchall()
         if len(fetch) > 1:
@@ -66,7 +66,7 @@ class Olymp:
     
 
     def unhandled_queue_left(self, finished: bool | None = None) -> bool:
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             status_list = ','.join(map(str, QueueStatus.active(as_numbers=True)))
             if finished is None:
@@ -98,7 +98,7 @@ class Olymp:
         if isinstance(participant, Participant): participant = participant.id
         if isinstance(examiner, Examiner): examiner = examiner.id
         if isinstance(problem, Problem): problem = problem.id
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             q = "SELECT * FROM queue WHERE olymp_id = ?"
             params = [self.id]
@@ -121,14 +121,14 @@ class Olymp:
 
     @staticmethod
     @provide_cursor
-    def list_all(*, cursor: sqlite3.Cursor | None = None):
+    def list_all(*, cursor: Cursor | None = None):
         cursor.execute("SELECT * FROM olymps")
         results = cursor.fetchall()
         return [Olymp(*fetch) for fetch in results]
 
 
     @provide_cursor
-    def __amount(self, table: str, conditions: list[str] = [], params: list = [], *, cursor: sqlite3.Cursor | None = None) -> int:
+    def __amount(self, table: str, conditions: list[str] = [], params: list = [], *, cursor: Cursor | None = None) -> int:
         cursor.execute(f"SELECT 1 FROM {table} WHERE " + " AND ".join(["olymp_id = ?"] + conditions), tuple([self.id] + params))
         return len(cursor.fetchall())
 
@@ -192,7 +192,7 @@ class Olymp:
         sort: bool = False, finished: bool | None = None, 
         include_tags: list[Tag] | list[int] | list[str] | None = None,
         exclude_tags: list[Tag] | list[int] | list[str] | None = None,
-        cursor: sqlite3.Cursor | None = None
+        cursor: Cursor | None = None
     ) -> list[Participant]:
         if not limit and start:
             raise ValueError("Нельзя устанавливать начало списка участников, не устанавливая ограничение на количество")
@@ -224,7 +224,7 @@ class Olymp:
         sort: bool = False, only_free: bool = False, order_by_busyness: bool = False, 
         include_tags: list[Tag] | list[int] | list[str] | None = None,
         exclude_tags: list[Tag] | list[int] | list[str] | None = None,
-        cursor: sqlite3.Cursor | None = None
+        cursor: Cursor | None = None
     ) -> list[Examiner]:
         if not limit and start:
             raise ValueError("Нельзя устанавливать начало списка принимающих, не устанавливая ограничение на количество")
@@ -247,7 +247,7 @@ class Olymp:
         return self.__amount("examiners")
     
     @provide_cursor
-    def get_problems(self, *, sort: bool = False, cursor: sqlite3.Cursor | None = None) -> list[Problem]:
+    def get_problems(self, *, sort: bool = False, cursor: Cursor | None = None) -> list[Problem]:
         q = "SELECT * FROM problems WHERE olymp_id = ?"
         if sort: q += " ORDER BY id"
         cursor.execute(q, (self.id,))
@@ -258,7 +258,7 @@ class Olymp:
         return self.__amount("problems")
     
     @provide_cursor
-    def get_problem_blocks(self, *, sort: bool = False, cursor: sqlite3.Cursor | None = None) -> list[ProblemBlock]:
+    def get_problem_blocks(self, *, sort: bool = False, cursor: Cursor | None = None) -> list[ProblemBlock]:
         q = "SELECT * FROM problem_blocks WHERE olymp_id = ?"
         if sort: q += " ORDER BY id"
         cursor.execute(q, (self.id,))

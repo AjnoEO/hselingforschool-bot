@@ -46,6 +46,39 @@ class QueueStatus(SqliteCompatibleEnum):
         return self.__DESCRIPTIONS[self.value].capitalize()
 
 
+class Platform(SqliteCompatibleEnum):
+    TELEGRAM = 0
+    VK = 1
+
+    __NAMES = ["Телеграм", "ВКонтакте"]
+    __CODES = ["telegram", "vk"]
+
+    def __str__(self) -> str:
+        return self.__NAMES[self.value]
+
+    @property
+    def code(self) -> str:
+        return self.__CODES[self.value]
+
+    @classmethod
+    def from_code(cls, code: str):
+        aliases = {
+            "telegram": cls.TELEGRAM, "tg": cls.TELEGRAM,
+            "vk": cls.VK, "vkontakte": cls.VK,
+        }
+        return aliases[code.lower().strip().lstrip("@")]
+
+    def direct_url(self, handle: str, external_id: int | None = None) -> str:
+        handle = handle.lstrip("@")
+        if self is Platform.TELEGRAM:
+            if handle.isnumeric():
+                return f"tg://user?id={external_id or handle}"
+            return f"https://t.me/{handle}"
+        if handle.isnumeric():
+            return f"https://vk.ru/id{external_id or handle}"
+        return f"https://vk.ru/{handle}"
+
+
 class BlockType(SqliteCompatibleEnum):
     JUNIOR_1 = 0
     JUNIOR_2 = 1

@@ -1,27 +1,28 @@
-import sqlite3
-from db import DATABASE
-from utils import UserError, decline, provide_cursor, value_exists, update_in_table
+from sqlite3 import Cursor
+from db import db_connection
+from utils import UserError, decline, escape_html, provide_cursor, value_exists, update_in_table
 from tag import Tag
-from enums import OlympStatus
+from enums import OlympStatus, Platform
 from queue_entry import QueueEntry, QueueStatus
 from problem import Problem, ProblemBlock, BlockType
-from data import OWNER_HANDLE
-from telebot.formatting import escape_html
+from data import OWNER_HANDLES
 
 
 class User:
     def __init__(
         self,
         user_id: int,
-        tg_id: int | None,
-        tg_handle: str,
+        platform: Platform,
+        external_id: int | None,
+        handle: str,
         name: str,
         surname: str,
         tags: list[int],
     ):
         self.__user_id: int = user_id
-        self.__tg_id: int | None = tg_id
-        self.__tg_handle: str = self.conform_tg_handle(tg_handle)
+        self.__platform: Platform = platform if isinstance(platform, Platform) else Platform(platform)
+        self.__external_id: int | None = external_id
+        self.__handle: str = self.conform_handle(handle)
         self.__name: str = name
         self.__surname: str = surname
         self.__tags: list[int] = tags
@@ -30,37 +31,45 @@ class User:
     @provide_cursor
     def create(
         cls,
-        tg_handle: str,
+        handle: str,
         name: str,
         surname: str,
         *,
-        tg_id: int | None = None,
+        platform: Platform = Platform.TELEGRAM,
+        external_id: int | None = None,
         tags: list[int] | None = None,
         ok_if_exists: bool = False,
-        cursor: sqlite3.Cursor | None = None,
+        cursor: Cursor | None = None,
     ):
         """
         Добавить пользователя в таблицу users
         """
-        tg_handle = cls.conform_tg_handle(tg_handle)
-        exists = value_exists("users", {"tg_handle": tg_handle})
+        platform = platform if isinstance(platform, Platform) else Platform(platform)
+        handle = cls.conform_handle(handle)
+        exists = value_exists("users", {"platform": platform, "handle": handle})
         if exists and not ok_if_exists:
-            raise UserError(f"Пользователь @{tg_handle} уже есть в базе")
-        if tg_id:
-            exists = exists or value_exists("users", {"tg_id": tg_id})
+            raise UserError(f"Пользователь @{handle} уже есть в базе")
+        if external_id is not None:
+            exists = exists or value_exists("users", {"platform": platform, "external_id": external_id})
             if exists and not ok_if_exists:
-                raise UserError(f"Пользователь с Telegram ID {tg_id} уже есть в базе")
+                raise UserError(f"Пользователь с ID {external_id} уже есть в базе")
         if not exists:
             cursor.execute(
-                "INSERT INTO users(tg_id, tg_handle, name, surname) VALUES (?, ?, ?, ?)", 
-                (tg_id, tg_handle, name, surname)
+                "INSERT INTO users(platform, external_id, handle, name, surname) VALUES (?, ?, ?, ?, ?)",
+                (platform, external_id, handle, name, surname)
+            )
+        elif external_id is not None:
+            cursor.execute(
+                "UPDATE users SET external_id = ?, name = ?, surname = ? WHERE platform = ? AND handle = ?",
+                (external_id, name, surname, platform, handle)
             )
         else:
             cursor.execute(
-                "UPDATE users SET tg_id = ?, name = ?, surname = ? WHERE tg_handle = ?",
-                (tg_id, name, surname, tg_handle)
+                "UPDATE users SET name = ?, surname = ? WHERE platform = ? AND handle = ?",
+                (name, surname, platform, handle)
             )
-        user_id = cursor.lastrowid
+        cursor.execute("SELECT user_id FROM users WHERE platform = ? AND handle = ?", (platform, handle))
+        user_id = cursor.fetchone()[0]
         if tags and len(tags) > 0:
             q = "INSERT INTO user_tags(user_id, tag_id) VALUES " + ", ".join(["(?, ?)"] * len(tags))
             t = []
@@ -68,58 +77,54 @@ class User:
                 t += [user_id, tag_id]
             cursor.execute(q, tuple(t))
         cursor.connection.commit()
-        return cls.from_tg_handle(tg_handle)
+        return cls.from_handle(platform, handle)
 
     @classmethod
     def from_db(
         cls,
         *,
         user_id: int | None = None,
-        tg_id: int | None = None,
-        tg_handle: str | None = None,
+        platform: Platform | None = None,
+        external_id: int | None = None,
+        handle: str | None = None,
         error_no_id_provided: str = "Требуется идентификатор пользователя",
         error_user_not_found: str | None = "Пользователь не найден в базе",
         error_ids_dont_match: str = "Данные идентификаторы не соответствуют"
     ):
-        if tg_handle:
-            tg_handle = cls.conform_tg_handle(tg_handle)
-        if tg_id:
-            checked_column = "tg_id"
-            given_value = tg_id
-        elif user_id:
-            checked_column = "user_id"
-            given_value = user_id
-        elif tg_handle:
-            checked_column = "tg_handle"
-            given_value = tg_handle
+        if platform is not None and not isinstance(platform, Platform):
+            platform = Platform(platform)
+        if external_id is not None:
+            if platform is None:
+                raise ValueError("Для поиска по ID мессенджера необходимо указать платформу")
+            conditions = {"platform": platform, "external_id": external_id}
+        elif handle is not None:
+            if platform is None:
+                raise ValueError("Для поиска по хэндлу необходимо указать платформу")
+            handle = cls.conform_handle(handle)
+            conditions = {"platform": platform, "handle": handle}
+        elif user_id is not None:
+            conditions = {"user_id": user_id}
         else:
             raise ValueError(error_no_id_provided)
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
-            if not value_exists("users", {checked_column: given_value}, cursor=cur):
+            if not value_exists("users", conditions, cursor=cur):
                 if not error_user_not_found:
                     return None
                 raise UserError(error_user_not_found)
-            q = f"""
-                SELECT
-                    user_id,
-                    tg_id,
-                    tg_handle,
-                    name,
-                    surname
-                FROM
-                    users
-                WHERE
-                    {checked_column} = ?
-                """
-            cur.execute(q, (given_value,))
+            q = (
+                "SELECT user_id, platform, external_id, handle, name, surname FROM users WHERE "
+                + " AND ".join(f"{column} = ?" for column in conditions)
+            )
+            cur.execute(q, tuple(conditions.values()))
             fetched_base_values = list(cur.fetchone())
         user = cls(*fetched_base_values, tags=[])
-        if ((tg_id and user.tg_id != tg_id)
-            or (user_id and user.user_id != user_id)
-            or (tg_handle and user.tg_handle != tg_handle)):
+        if ((user_id is not None and user.user_id != user_id)
+            or (platform is not None and user.platform != platform)
+            or (external_id is not None and user.external_id != external_id)
+            or (handle is not None and user.handle != handle)):
             raise ValueError(error_ids_dont_match)
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT tag_id FROM user_tags WHERE user_id = ?", (user.__user_id,))
             result = cur.fetchall()
@@ -133,39 +138,40 @@ class User:
         return cls.from_db(user_id=user_id)
 
     @classmethod
-    def from_tg_id(cls, tg_id: int, no_error: bool = False):
+    def from_external_id(cls, platform: Platform, external_id: int, no_error: bool = False):
         if no_error:
-            return cls.from_db(tg_id=tg_id, error_user_not_found=None)
-        return cls.from_db(tg_id=tg_id)
-    
+            return cls.from_db(platform=platform, external_id=external_id, error_user_not_found=None)
+        return cls.from_db(platform=platform, external_id=external_id)
+
     @classmethod
-    def from_tg_handle(cls, tg_handle: str, no_error: bool = False):
+    def from_handle(cls, platform: Platform, handle: str, no_error: bool = False):
         if no_error:
-            return cls.from_db(tg_handle=tg_handle, error_user_not_found=None)
-        return cls.from_db(tg_handle=tg_handle)
-    
+            return cls.from_db(platform=platform, handle=handle, error_user_not_found=None)
+        return cls.from_db(platform=platform, handle=handle)
 
     @staticmethod
-    def conform_tg_handle(tg_handle: str):
-        tg_handle = tg_handle.lower().strip()
-        if tg_handle.startswith("@"):
-            tg_handle = tg_handle[1:]
-        return tg_handle
+    def conform_handle(handle: str):
+        handle = handle.lower().strip()
+        if handle.startswith("@"):
+            handle = handle[1:]
+        return handle
 
 
     @provide_cursor
-    def remove(self, *, cursor: sqlite3.Cursor | None = None):
+    def remove(self, *, cursor: Cursor | None = None):
         cursor.execute("DELETE FROM users WHERE user_id = ?", (self.user_id,))
 
 
     def conflate_with(self, new_user: 'User'):
-        if not self.tg_id and new_user.tg_id:
+        if not self.external_id and new_user.external_id:
             self, new_user = new_user, self
+        if self.platform != new_user.platform:
+            raise UserError("Нельзя объединить пользователей разных платформ")
         new_name = new_user.name
         new_surname = new_user.surname
-        new_tg_handle = new_user.tg_handle
+        new_handle = new_user.handle
         new_tags = new_user.tags
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("UPDATE participants SET user_id = ? WHERE user_id = ?", (self.user_id, new_user.user_id))
             cur.execute("UPDATE examiners SET user_id = ? WHERE user_id = ?", (self.user_id, new_user.user_id))
@@ -173,12 +179,16 @@ class User:
             conn.commit()
         self.name = new_name
         self.surname = new_surname
-        self.tg_handle = new_tg_handle
+        self.handle = new_handle
         self.set_tags(new_tags)
     
 
-    def display_tg_handle(self, hide_id: bool = False) -> str:
-        return (f"Без хэндла" if hide_id else f"ID: <code>{self.tg_handle}</code>") if self.tg_handle.isnumeric() else f"@{self.tg_handle}"
+    def display_handle(self, hide_id: bool = False) -> str:
+        if hide_id and self.handle.isnumeric():
+            return "Без хэндла"
+        label = escape_html(f"{self.platform.code}@{self.handle}")
+        url = escape_html(self.platform.direct_url(self.handle, self.external_id))
+        return f'<a href="{url}">{label}</a>'
     
     def display_tags(self, verbose: bool = False, hide_name: bool = True, sep: str = "\n", end: str = "") -> str:
         result = ""
@@ -204,7 +214,7 @@ class User:
             tag = tag.id
         if tag in self.tags:
             raise ValueError(f"У пользователя {self.user_id} уже есть тэг {tag}")
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("INSERT INTO user_tags(user_id, tag_id) VALUES (?, ?)", (self.user_id, tag))
             conn.commit()
@@ -215,7 +225,7 @@ class User:
             tag = tag.id
         if tag not in self.tags:
             raise ValueError(f"У пользователя {self.user_id} уже нет тэга {tag}")
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("DELETE FROM user_tags WHERE user_id = ? AND tag_id = ?", (self.user_id, tag))
             conn.commit()
@@ -234,7 +244,7 @@ class User:
         for tag in tags:
             if tag not in self.tags:
                 add.append(tag)
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             for tag in remove:
                 cur.execute("DELETE FROM user_tags WHERE user_id = ? AND tag_id = ?", (self.user_id, tag))
@@ -249,24 +259,26 @@ class User:
 
     
     def __str__(self):
-        return f"{self.full_name} ({self.display_tg_handle()})"
+        return f"{self.full_name} ({self.display_handle()})"
 
 
     @property
     def user_id(self): return self.__user_id
     @property
-    def tg_handle(self): return self.__tg_handle
-    @tg_handle.setter
-    def tg_handle(self, value: str):
-        value = self.conform_tg_handle(value)
-        self.__set('tg_handle', value.lower())
-        self.__tg_handle = value
+    def handle(self): return self.__handle
+    @handle.setter
+    def handle(self, value: str):
+        value = self.conform_handle(value)
+        self.__set('handle', value)
+        self.__handle = value
     @property
-    def tg_id(self): return self.__tg_id
-    @tg_id.setter
-    def tg_id(self, value: int):
-        self.__set('tg_id', value)
-        self.__tg_id = value
+    def external_id(self): return self.__external_id
+    @external_id.setter
+    def external_id(self, value: int | None):
+        self.__set('external_id', value)
+        self.__external_id = value
+    @property
+    def platform(self): return self.__platform
     @property
     def name(self): return self.__name
     @name.setter
@@ -284,20 +296,25 @@ class User:
     @property
     def tags(self): return self.__tags
 
+    @property
+    def is_authenticated(self) -> bool:
+        return self.external_id is not None
+
 
 class OlympMember(User):
     def __init__(
         self,
         olymp_id: int,
         user_id: int,
-        tg_id: int | None,
-        tg_handle: int,
+        platform: Platform,
+        external_id: int | None,
+        handle: str,
         name: str,
         surname: str,
         tags: list[int],
         **additional_values
     ):
-        super().__init__(user_id, tg_id, tg_handle, name, surname, tags)
+        super().__init__(user_id, platform, external_id, handle, name, surname, tags)
         self.__olymp_id: int = olymp_id
         self.__id: int | None = None
         self._additional_values = additional_values
@@ -310,19 +327,20 @@ class OlympMember(User):
         additional_keys: list[str],
         *,
         user_id: int | None = None,
-        tg_id: int | None = None,
-        tg_handle: str | None = None,
+        platform: Platform | None = None,
+        external_id: int | None = None,
+        handle: str | None = None,
         error_no_id_provided: str = "Требуется идентификатор пользователя",
         error_user_not_found: str | None = "Пользователь не найден в базе",
         error_ids_dont_match: str = "Данные идентификаторы не соответствуют"
     ):
-        user = User.from_db(user_id=user_id, tg_id=tg_id, tg_handle=tg_handle,
+        user = User.from_db(user_id=user_id, platform=platform, external_id=external_id, handle=handle,
                             error_no_id_provided=error_no_id_provided,
                             error_user_not_found=error_user_not_found,
                             error_ids_dont_match=error_ids_dont_match)
         if not user:
             return None
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             if not value_exists(table, {"user_id": user.user_id, "olymp_id": olymp_id}, cursor = cur):
                 if not error_user_not_found:
@@ -342,8 +360,9 @@ class OlympMember(User):
         return cls(
             olymp_id,
             user.user_id,
-            user.tg_id,
-            user.tg_handle,
+            user.platform,
+            user.external_id,
+            user.handle,
             user.name,
             user.surname,
             user.tags,
@@ -357,16 +376,16 @@ class OlympMember(User):
         return cls.from_db(olymp_id, user_id=user_id) 
 
     @classmethod
-    def from_tg_id(cls, tg_id: int, olymp_id: int, no_error: bool = False):
+    def from_external_id(cls, platform: Platform, external_id: int, olymp_id: int, no_error: bool = False):
         if no_error:
-            return cls.from_db(olymp_id, tg_id=tg_id, error_user_not_found=None)
-        return cls.from_db(olymp_id, tg_id=tg_id)
+            return cls.from_db(olymp_id, platform=platform, external_id=external_id, error_user_not_found=None)
+        return cls.from_db(olymp_id, platform=platform, external_id=external_id)
 
     @classmethod
-    def from_tg_handle(cls, tg_handle: str, olymp_id: int, no_error: bool = False):
+    def from_handle(cls, platform: Platform, handle: str, olymp_id: int, no_error: bool = False):
         if no_error:
-            return cls.from_db(olymp_id, tg_handle=tg_handle, error_user_not_found=None)
-        return cls.from_db(olymp_id, tg_handle=tg_handle)
+            return cls.from_db(olymp_id, platform=platform, handle=handle, error_user_not_found=None)
+        return cls.from_db(olymp_id, platform=platform, handle=handle)
 
     @classmethod
     def from_id(
@@ -376,7 +395,7 @@ class OlympMember(User):
         *,
         error_user_not_found: str | None = "Пользователь не найден в базе",
     ):
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute(f"SELECT user_id, olymp_id FROM {table} WHERE id = ?", (id,))
             fetch = cur.fetchone()
@@ -416,7 +435,7 @@ class OlympMember(User):
         self.display_data(verbose, olymp_status, technical_info, contact_note)
 
     def _queue_entry(self, id_column: str):
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             q = (f"SELECT * FROM queue WHERE {id_column} = ? "
                  f"AND status IN ({', '.join(map(str, QueueStatus.active(as_numbers=True)))})")
@@ -436,8 +455,9 @@ class Participant(OlympMember):
         self,
         olymp_id: int,
         user_id: int,
-        tg_id: int | None,
-        tg_handle: int,
+        platform: Platform,
+        external_id: int | None,
+        handle: str,
         name: str,
         surname: str,
         tags: list[int],
@@ -447,7 +467,7 @@ class Participant(OlympMember):
         id: int
     ):
         super().__init__(
-            olymp_id, user_id, tg_id, tg_handle, name, surname, tags,
+            olymp_id, user_id, platform, external_id, handle, name, surname, tags,
             id=id, grade=grade, last_block_number=last_block_number, finished=finished
         )
         self.__id: int = id
@@ -467,8 +487,8 @@ class Participant(OlympMember):
         last_block_number: int | None = None,
         finished: bool = False,
         ok_if_exists: bool = False,
-        cursor: sqlite3.Cursor | None = None,
-    ):
+        cursor: Cursor | None = None,
+    ) -> Participant:
         """
         Добавить пользователя как участника в таблицу participants
         """
@@ -497,24 +517,28 @@ class Participant(OlympMember):
     @provide_cursor
     def create_as_new_user(
         cls,
-        tg_handle: str,
+        handle: str,
         name: str,
         surname: str,
         grade: str,
         olymp_id: int,
         *,
-        tg_id: int | None = None,
+        platform: Platform = Platform.TELEGRAM,
+        external_id: int | None = None,
         tags: list[int] | None = None,
         last_block_number: int | None = None,
         finished: bool = False,
         ok_if_user_exists: bool = False,
         ok_if_exists: bool = False,
-        cursor: sqlite3.Cursor | None = None,
+        cursor: Cursor | None = None,
     ):
         """
         Добавить пользователя в таблицу users и добавить его как участника в таблицу participants
         """
-        user = User.create(tg_handle, name, surname, tg_id=tg_id, tags=tags, ok_if_exists=ok_if_user_exists, cursor=cursor)
+        user = User.create(
+            handle, name, surname, platform=platform, external_id=external_id,
+            tags=tags, ok_if_exists=ok_if_user_exists, cursor=cursor
+        )
         return Participant.create_for_existing_user(
             user, grade, olymp_id, last_block_number=last_block_number, finished=finished,
             ok_if_exists=ok_if_exists, cursor=cursor
@@ -526,8 +550,9 @@ class Participant(OlympMember):
         olymp_id: int,
         *,
         user_id: int | None = None,
-        tg_id: int | None = None,
-        tg_handle: str | None = None,
+        platform: Platform | None = None,
+        external_id: int | None = None,
+        handle: str | None = None,
         error_user_not_found: str | None = ("Участник не найден. Если ты участник, "
                                             "авторизуйся при помощи команды /start.")
     ):
@@ -536,8 +561,9 @@ class Participant(OlympMember):
             "participants", 
             ["id", "grade", "last_block_number", "finished"], 
             user_id = user_id, 
-            tg_id = tg_id,
-            tg_handle = tg_handle,
+            platform = platform,
+            external_id = external_id,
+            handle = handle,
             error_no_id_provided = "Требуется идентификатор участника",
             error_user_not_found = error_user_not_found
         )
@@ -550,7 +576,7 @@ class Participant(OlympMember):
         return participant
 
     @classmethod
-    def from_id(cls, id: int, no_error: bool = False):
+    def from_id(cls, id: int, no_error: bool = False) -> (Participant | None):
         if no_error:
             return super().from_id(id, "participants", error_user_not_found=None)
         return super().from_id(id, "participants", error_user_not_found="Участник не найден")
@@ -562,17 +588,17 @@ class Participant(OlympMember):
     ):
         response = f"{self.name} {self.surname}, {self.grade} класс"
         if technical_info:
-            response += f" ({self.display_tg_handle()})"
+            response += f" ({self.display_handle()})"
         display_tags = self.display_tags(verbose = verbose, hide_name = not technical_info)
         if display_tags: response += "\n" + display_tags
         if technical_info:
-            response += f"\nАвторизация " + ("пройдена" if self.tg_id else "не пройдена")
+            response += f"\nАвторизация " + ("пройдена" if self.is_authenticated else "не пройдена")
             response += (
                 "\nУчастие завершено"
                 if self.finished or olymp_status == OlympStatus.RESULTS else 
                 "\nУчаствует"
             )
-        if contact_note: response += f"\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLE}"
+        if contact_note: response += f"\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLES[self.platform]}"
         return response
     
     def problem_block_from_number(self, number: int):
@@ -633,9 +659,10 @@ class Participant(OlympMember):
         if isinstance(problem, int):
             problem = self.problem_from_number(problem)
 
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("INSERT INTO queue(olymp_id, participant_id, problem_id) VALUES (?, ?, ?)", (self.olymp_id, self.id, problem.id))
+            conn.commit()
             queue_entry = QueueEntry(cur.lastrowid, self.olymp_id, self.id, problem.id)
 
         examiner_id = queue_entry.look_for_examiner()
@@ -657,7 +684,7 @@ class Participant(OlympMember):
         """
         if isinstance(problem, int):
             problem = self.problem_from_number(problem)
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute(
                 "SELECT 1 FROM queue WHERE participant_id = ? AND problem_id = ? AND status = ?", 
@@ -723,8 +750,9 @@ class Examiner(OlympMember):
         self,
         olymp_id: int,
         user_id: int,
-        tg_id: int | None,
-        tg_handle: int,
+        platform: Platform,
+        external_id: int | None,
+        handle: str,
         name: str,
         surname: str,
         tags: list[int],
@@ -734,7 +762,7 @@ class Examiner(OlympMember):
         id: int,
         problems: list[int] | str | None = None
     ):
-        super().__init__(olymp_id, user_id, tg_id, tg_handle, name, surname, tags,
+        super().__init__(olymp_id, user_id, platform, external_id, handle, name, surname, tags,
                          id=id, conference_link=conference_link, problems=problems,
                          busyness_level=busyness_level, is_busy=is_busy)
         if isinstance(problems, str):
@@ -760,8 +788,8 @@ class Examiner(OlympMember):
         busyness_level: int = 0,
         is_busy: bool = True,
         ok_if_exists: bool = False,
-        cursor: sqlite3.Cursor | None = None,
-    ):
+        cursor: Cursor | None = None,
+    ) -> Examiner:
         """
         Добавить пользователя как принимающего в таблицу examiners
         """
@@ -796,25 +824,29 @@ class Examiner(OlympMember):
     @provide_cursor
     def create_as_new_user(
         cls,
-        tg_handle: str,
+        handle: str,
         name: str,
         surname: str,
         conference_link: str,
         olymp_id: int,
         *,
-        tg_id: int | None = None,
+        platform: Platform = Platform.TELEGRAM,
+        external_id: int | None = None,
         tags: list[int] | None = None,
         problems: list[int] | None = None,
         busyness_level: int = 0,
         is_busy: bool = True,
         ok_if_user_exists: bool = False,
         ok_if_exists: bool = False,
-        cursor: sqlite3.Cursor | None = None,
+        cursor: Cursor | None = None,
     ):
         """
         Добавить пользователя в таблицу users и добавить его как принимающего в таблицу examiners
         """
-        user = User.create(tg_handle, name, surname, tg_id=tg_id, tags=tags, ok_if_exists=ok_if_user_exists, cursor=cursor)
+        user = User.create(
+            handle, name, surname, platform=platform, external_id=external_id,
+            tags=tags, ok_if_exists=ok_if_user_exists, cursor=cursor
+        )
         return Examiner.create_for_existing_user(
             user, conference_link, olymp_id, problems=problems,
             busyness_level=busyness_level, is_busy=is_busy, ok_if_exists=ok_if_exists, cursor=cursor
@@ -826,8 +858,9 @@ class Examiner(OlympMember):
         olymp_id: int,
         *,
         user_id: int | None = None,
-        tg_id: int | None = None,
-        tg_handle: str | None = None,
+        platform: Platform | None = None,
+        external_id: int | None = None,
+        handle: str | None = None,
         error_user_not_found: str | None = ("Принимающий не найден. Если ты принимающий, "
                                             "авторизуйся при помощи команды /start.")
     ):
@@ -836,8 +869,9 @@ class Examiner(OlympMember):
             "examiners", 
             ["id", "conference_link", "busyness_level", "is_busy"], 
             user_id = user_id, 
-            tg_id = tg_id,
-            tg_handle = tg_handle,
+            platform = platform,
+            external_id = external_id,
+            handle = handle,
             error_no_id_provided = "Требуется идентификатор принимающего",
             error_user_not_found = error_user_not_found
         )
@@ -847,7 +881,7 @@ class Examiner(OlympMember):
         examiner.__conference_link = examiner._additional_values["conference_link"]
         examiner.__busyness_level = examiner._additional_values["busyness_level"]
         examiner.__is_busy = bool(examiner._additional_values["is_busy"])
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT problem_id FROM examiner_problems WHERE examiner_id = ?", (examiner.__id,))
             result = cur.fetchall()
@@ -855,7 +889,7 @@ class Examiner(OlympMember):
         return examiner
 
     @classmethod
-    def from_id(cls, id: int, no_error: bool = False):
+    def from_id(cls, id: int, no_error: bool = False) -> (Examiner | None):
         if no_error:
             return super().from_id(id, "examiners", error_user_not_found=None)
         return super().from_id(id, "examiners", error_user_not_found="Принимающий не найден")
@@ -877,11 +911,11 @@ class Examiner(OlympMember):
     ):
         response = f"{self.name} {self.surname}"
         if technical_info:
-            response += f" ({self.display_tg_handle()})"
+            response += f" ({self.display_handle()})"
         display_tags = self.display_tags(verbose = verbose, hide_name = not technical_info)
         if display_tags: response += "\n" + display_tags
         if technical_info:
-            response += f"\nАвторизация " + ("пройдена" if self.tg_id else "не пройдена")
+            response += f"\nАвторизация " + ("пройдена" if self.is_authenticated else "не пройдена")
         response += f"\nCсылка на конференцию: {self.conference_link}"
         if verbose:
             if not olymp_status:
@@ -891,7 +925,7 @@ class Examiner(OlympMember):
                 response += f"\nСтатус: {'занят(-а)' if self.is_busy else 'свободен(-на)'}"
             if olymp_status in [OlympStatus.CONTEST, OlympStatus.QUEUE, OlympStatus.RESULTS]:
                 response += f"\nОбсуждений с участниками: {self.busyness_level}"
-        if contact_note: response += f"\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLE}"
+        if contact_note: response += f"\nЕсли в данных есть ошибка, сообщи {OWNER_HANDLES[self.platform]}"
         return response
     
     def assign_to_queue_entry(self, queue_entry: QueueEntry):
@@ -923,7 +957,7 @@ class Examiner(OlympMember):
         """
         if self.queue_entry:
             raise ValueError(f"Принимающий {self.id} уже есть в очереди (запись {self.queue_entry.id})")
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()            
             q = f"""
                 SELECT
@@ -946,7 +980,7 @@ class Examiner(OlympMember):
             problem = problem.id
         if problem in self.problems:
             raise ValueError(f"Принимающий {self.id} уже принимает задачу {problem}")
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("INSERT INTO examiner_problems(examiner_id, problem_id) VALUES (?, ?)", (self.id, problem))
             conn.commit()
@@ -957,7 +991,7 @@ class Examiner(OlympMember):
             problem = problem.id
         if problem not in self.problems:
             raise ValueError(f"Принимающий {self.id} уже не принимает задачу {problem}")
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             cur.execute("DELETE FROM examiner_problems WHERE examiner_id = ? AND problem_id = ?", (self.id, problem))
             conn.commit()
@@ -976,7 +1010,7 @@ class Examiner(OlympMember):
         for problem in problems:
             if problem not in self.problems:
                 add.append(problem)
-        with sqlite3.connect(DATABASE) as conn:
+        with db_connection() as conn:
             cur = conn.cursor()
             for problem in remove:
                 cur.execute("DELETE FROM examiner_problems WHERE examiner_id = ? AND problem_id = ?", (self.id, problem))

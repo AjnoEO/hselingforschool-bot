@@ -10,6 +10,10 @@ CREATE TABLE IF NOT EXISTS `block_types` (
 	`id` integer primary key NOT NULL UNIQUE,
 	`name` text NOT NULL UNIQUE
 );
+CREATE TABLE IF NOT EXISTS `platforms` (
+	`id` integer primary key NOT NULL UNIQUE,
+	`name` text NOT NULL UNIQUE
+);
 CREATE TABLE IF NOT EXISTS `tags` (
     `id` integer primary key NOT NULL UNIQUE,
     `name` text NOT NULL UNIQUE,
@@ -23,15 +27,25 @@ CREATE TABLE IF NOT EXISTS `olymps` (
 );
 CREATE TABLE IF NOT EXISTS `users` (
 	`user_id` integer primary key NOT NULL UNIQUE,
-	`tg_id` INTEGER UNIQUE,
-	`tg_handle` TEXT NOT NULL UNIQUE,
+	`platform` INTEGER NOT NULL,
+	`external_id` INTEGER,
+	`handle` TEXT NOT NULL,
 	`name` TEXT NOT NULL,
-	`surname` TEXT NOT NULL
+	`surname` TEXT NOT NULL,
+	UNIQUE (`platform`, `external_id`),
+	UNIQUE (`platform`, `handle`),
+	FOREIGN KEY(`platform`) REFERENCES `platforms`(`id`)
+);
+CREATE TABLE IF NOT EXISTS `conversation_states` (
+	`platform` INTEGER NOT NULL,
+	`peer_id` INTEGER NOT NULL,
+	`state` TEXT NOT NULL,
+	PRIMARY KEY (`platform`, `peer_id`)
 );
 CREATE TABLE IF NOT EXISTS `user_tags` (
     `user_id` integer NOT NULL,
     `tag_id` integer NOT NULL,
-	FOREIGN KEY(`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+	FOREIGN KEY(`user_id`) REFERENCES `users`(`user_id`) ON DELETE CASCADE,
 	FOREIGN KEY(`tag_id`) REFERENCES `tags`(`id`) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS `problems` (

@@ -6,6 +6,8 @@ database/version.txt
 # Рабочие файлы
 downloaded_files
 created_files
+.tmp
+backups
 
 # Конфиденциальная инфа
 config.ini
