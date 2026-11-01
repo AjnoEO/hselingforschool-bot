@@ -44,7 +44,7 @@ class TelegramMessenger(Messenger):
             return InputFile(media.path, media.filename)
         return InputFile(media.data, media.filename)
 
-    def send_text(
+    def send_text( # TODO: Дробить длинные сообщения
         self,
         peer_id: int,
         text: str,

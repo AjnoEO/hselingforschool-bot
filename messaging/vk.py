@@ -130,14 +130,42 @@ class VkMessenger(Messenger):
     def send_text(self, peer_id, text, *, keyboard=None, reply_to=None) -> MessageRef:
         return self.__send(peer_id, text, keyboard=keyboard, reply_to=reply_to)
 
+    def __upload_photo(self, path: str, peer_id: int) -> dict:
+        # VkUpload.photo_messages sends the file as "file0", but VK's messages
+        # photo upload server expects the field "photo".
+        url = self.api.photos.getMessagesUploadServer(peer_id=peer_id)["upload_url"]
+        with open(path, "rb") as photo:
+            response = requests.post(
+                url,
+                files={"photo": (os.path.basename(path), photo)},
+                timeout=30,
+            )
+        try:
+            data = response.json()
+        except ValueError as error:
+            # TODO: повторять загрузку и разбирать v2/bulk_upload
+            raise RuntimeError(f"VK photo upload failed: HTTP {response.status_code}") from error
+        if data.get("error"):
+            raise RuntimeError(f"VK photo upload failed: {data['error']}")
+        return self.api.photos.saveMessagesPhoto(
+            server=data["server"],
+            photo=data["photo"],
+            hash=data["hash"],
+        )[0]
+
     def send_photo(self, peer_id, media, *, caption="", keyboard=None,
                    show_caption_above_media=False) -> MessageRef:
-        path, temporary = self.__path(media)
         try:
-            uploaded = self.upload.photo_messages(path, peer_id=peer_id)[0]
-        finally:
-            if temporary:
-                os.unlink(temporary)
+            path, temporary = self.__path(media)
+            try:
+                uploaded = self.__upload_photo(path, peer_id)
+            finally:
+                if temporary:
+                    os.unlink(temporary)
+        except Exception as error:
+            # TODO: пробрасывать ошибку после того, как починим загрузку VK
+            print(f"! Не удалось отправить фото в VK: {error}")
+            return self.send_text(peer_id, caption or "Не удалось отправить изображение", keyboard=keyboard)
         attachment = f"photo{uploaded['owner_id']}_{uploaded['id']}"
         return self.__send(peer_id, caption, attachment=attachment, keyboard=keyboard)
 
@@ -173,9 +201,15 @@ class VkMessenger(Messenger):
         )
 
     def delete(self, ref) -> None:
-        self.api.messages.delete(
-            peer_id=ref.peer_id, message_ids=ref.message_id, delete_for_all=1
-        )
+        try:
+            # VK requires cmids together with peer_id for conversation messages.
+            self.api.messages.delete(
+                peer_id=ref.peer_id, cmids=[ref.message_id], delete_for_all=1
+            )
+        except Exception as error:
+            # TODO: разобраться с удалением сообщений в VK
+            if "can not be found" not in str(error):
+                print(f"! Не удалось удалить сообщение VK: {error}")
 
     def answer_callback(self, callback_id, text="", show_alert=False, *,
                         user_id=None, peer_id=None) -> None:
@@ -183,10 +217,13 @@ class VkMessenger(Messenger):
             # TODO: пробрасывать user_id/peer_id всегда
             raise ValueError("Для ответа на callback в VK нужны user_id и peer_id")
         self.api.messages.sendMessageEventAnswer(
-            event_id=int(callback_id),
+            event_id=callback_id,
             user_id=user_id,
             peer_id=peer_id,
-            event_data=json.dumps({"type": "show_snackbar", "text": text}, ensure_ascii=False),
+            event_data=json.dumps(
+                {"type": "show_snackbar", "text": text or "Готово"},
+                ensure_ascii=False,
+            ),
         )
 
     def copy_message(self, peer_id, ref) -> MessageRef:

@@ -81,6 +81,14 @@ class BotHandlerSmokeTest(DatabaseTestCase):
         self.assertEqual(self.messenger.calls[0][0], "answer")
         self.assertEqual(self.messenger.calls[0][2], "Страницы нет")
 
+    def test_unknown_callback_is_still_answered(self):
+        callback = IncomingCallback(
+            Platform.TELEGRAM, "callback-2", 10, "sender",
+            "unknown_button", MessageRef(10, 20, Platform.TELEGRAM),
+        )
+        bot.handle_event(callback)
+        self.assertEqual(self.messenger.calls[0][0], "answer")
+
 
 class CrossPlatformAnnounceTest(DatabaseTestCase):
     def test_queue_entry_notifies_each_member_on_their_platform(self):

@@ -19,7 +19,7 @@ class Button:
 class Keyboard:
     """Клавиатура: обычная (внизу экрана) или inline"""
 
-    def __init__(self, *, inline: bool = False, resize: bool = True):
+    def __init__(self, *, inline: bool = False, resize: bool = True): # Сделать настройку для удаления после использования
         self.inline: bool = inline # TODO: А это вообще где-нибудь используется?
         self.resize: bool = resize
         self.rows: list[list[Button]] = []

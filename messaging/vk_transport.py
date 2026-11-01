@@ -1,7 +1,7 @@
 import json
 
 from vk_api import VkApi
-from vk_api.bot_longpoll import VkBotEventType, VkBotLongPoll
+from vk_api.bot_longpoll import VkBotEventType, VkBotLongPoll, VkBotEvent
 
 from enums import Platform
 from .events import IncomingCallback, IncomingMessage
@@ -45,7 +45,7 @@ class VkTransport:
                 return Document(doc.get("url", ""), name, ext)
         return None
 
-    def to_message_event(self, event) -> IncomingMessage:
+    def to_message_event(self, event: VkBotEvent) -> IncomingMessage:
         message = event.object.message if getattr(event.object, "message", None) is not None else event.object
         peer_id = int(message["peer_id"])
         sender_id = int(message["from_id"])
@@ -76,7 +76,7 @@ class VkTransport:
             reply_to=reply_to,
         )
 
-    def to_callback_event(self, event) -> IncomingCallback:
+    def to_callback_event(self, event: VkBotEvent) -> IncomingCallback:
         obj = event.object
         payload = obj.get("payload") or ""
         if isinstance(payload, str):
@@ -86,13 +86,14 @@ class VkTransport:
                 payload = {"data": payload}
         data = payload.get("data", "") if isinstance(payload, dict) else str(payload)
         peer_id = int(obj["peer_id"])
+        message_id = int(obj.get("conversation_message_id") or 0)
         return IncomingCallback(
             Platform.VK,
             str(obj["event_id"]),
             int(obj["user_id"]),
             self.__handle_for(int(obj["user_id"])),
             data,
-            MessageRef(peer_id, int(obj["conversation_message_id"]), Platform.VK),
+            MessageRef(peer_id, message_id, Platform.VK),
         )
 
     def start(self):
@@ -102,7 +103,9 @@ class VkTransport:
                 if event.type == VkBotEventType.MESSAGE_NEW:
                     self.on_event(self.to_message_event(event))
                 elif event.type == VkBotEventType.MESSAGE_EVENT:
-                    self.on_event(self.to_callback_event(event))
+                    callback = self.to_callback_event(event)
+                    print(f"VK: message_event {callback.callback_id} data={callback.data!r}")
+                    self.on_event(callback)
             except Exception:
                 # TODO: логировать и не терять polling при ошибке обработчика
                 import traceback

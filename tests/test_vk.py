@@ -1,12 +1,12 @@
 import unittest
 
 try:
-    from messaging.vk import html_to_vk, truncate_label, vk_keyboard
+    from messaging.vk import VkMessenger, html_to_vk, truncate_label, vk_keyboard
     from messaging.vk_transport import VkTransport
 except ImportError:  # vk-api is an optional dependency for non-VK test runs
-    html_to_vk = truncate_label = vk_keyboard = VkTransport = None
+    VkMessenger = html_to_vk = truncate_label = vk_keyboard = VkTransport = None
 
-from messaging import Button, Keyboard
+from messaging import Button, Keyboard, Media
 
 
 @unittest.skipIf(html_to_vk is None, "vk-api is not installed")
@@ -35,6 +35,51 @@ class VkFormattingTest(unittest.TestCase):
         result = vk_keyboard(keyboard)
         self.assertIn('"type":"text"', result)
         self.assertIn('"inline":false', result)
+
+
+@unittest.skipIf(VkMessenger is None, "vk-api is not installed")
+class VkMessengerTest(unittest.TestCase):
+    def test_photo_upload_failure_falls_back_to_text(self):
+        from unittest.mock import MagicMock, patch
+
+        messenger = object.__new__(VkMessenger)
+        messenger.api = MagicMock()
+        messenger.api.photos.getMessagesUploadServer.return_value = {"upload_url": "https://upload"}
+        messenger.api.messages.send.return_value = 42
+        messenger._VkMessenger__texts = {}
+
+        response = MagicMock()
+        response.status_code = 502
+        response.json.side_effect = ValueError("empty body")
+
+        with patch("messaging.vk.requests.post", return_value=response):
+            result = messenger.send_photo(
+                123, Media("predefined_files/buttons.png"), caption="Подпись"
+            )
+
+        self.assertEqual(result.message_id, 42)
+        self.assertEqual(messenger.api.messages.send.call_args.kwargs["message"], "Подпись")
+
+    def test_answer_callback_uses_event_ids(self):
+        from unittest.mock import MagicMock
+
+        messenger = object.__new__(VkMessenger)
+        messenger.api = MagicMock()
+        messenger.answer_callback("123", "Готово", user_id=10, peer_id=20)
+        messenger.api.messages.sendMessageEventAnswer.assert_called_once()
+        kwargs = messenger.api.messages.sendMessageEventAnswer.call_args.kwargs
+        self.assertEqual(kwargs["event_id"], "123")
+        self.assertEqual(kwargs["user_id"], 10)
+        self.assertEqual(kwargs["peer_id"], 20)
+
+    def test_empty_callback_text_uses_fallback_snackbar(self):
+        from unittest.mock import MagicMock
+
+        messenger = object.__new__(VkMessenger)
+        messenger.api = MagicMock()
+        messenger.answer_callback("123", "", user_id=10, peer_id=20)
+        kwargs = messenger.api.messages.sendMessageEventAnswer.call_args.kwargs
+        self.assertIn("Готово", kwargs["event_data"])
 
 
 @unittest.skipIf(VkTransport is None, "vk-api is not installed")

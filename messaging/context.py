@@ -48,6 +48,7 @@ class Context: # TODO: Точно надо? Точно не слишком те�
 
         self.callback_id = event.callback_id if isinstance(event, IncomingCallback) else None
         self.data = event.data if isinstance(event, IncomingCallback) else None
+        self.answered = False
 
     def __ref(self, ref: MessageRef | None = None) -> MessageRef:
         ref = ref or self.ref
@@ -158,6 +159,7 @@ class Context: # TODO: Точно надо? Точно не слишком те�
             self.callback_id, text=text, show_alert=show_alert,
             user_id=self.sender_id, peer_id=self.peer_id,
         )
+        self.answered = True
 
     def copy_to(self, user, ref: MessageRef) -> MessageRef:
         return self.messengers.copy_message(user, ref)

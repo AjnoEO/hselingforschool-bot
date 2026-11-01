@@ -81,6 +81,11 @@ def handle_event(event):
     ctx = build_context(event)
     handler = router.match(ctx)
     if handler is None:
+        if event.is_callback:
+            try:
+                ctx.answer()
+            except Exception as error:
+                print(f"! Не удалось ответить на callback: {error}")
         return
     try:
         with dispatch_lock:
@@ -103,6 +108,13 @@ def handle_event(event):
         print(exc)
         ctx.messenger.send_text(ctx.peer_id, error_message)
         raise
+    finally:
+        # VK requires an answer for every message_event, otherwise the client spins forever
+        if event.is_callback and not ctx.answered:
+            try:
+                ctx.answer()
+            except Exception as error:
+                print(f"! Не удалось ответить на callback: {error}")
 
 # TODO: Унести всё это добро в другой файл?
 def parse_identity_arg(arg: str) -> tuple[Platform, str]:
@@ -1009,10 +1021,13 @@ def view_member_command(ctx: Context):
         view_member(ctx, Examiner, 'принимающий', 'принимающего')
 
 
-def list_members_page(ref: MessageRef, member_class: type[OlympMember], page: int, member_amount: int, title: str,
-                      get_func: Callable[[int, int], list[OlympMember]]):
+def list_members_page(ctx: Context, ref: MessageRef | None, member_class: type[OlympMember], page: int, member_amount: int,
+                      title: str, get_func: Callable[[int, int], list[OlympMember]]):
     """
-    Отредактировать сообщение `ref`, чтобы отобразить страницу `page` списка членов олимпиады
+    Отредактировать сообщение `ref` в контексте `ctx`, чтобы отобразить страницу `page` списка членов олимпиады
+
+    :param ctx: Контекст события
+    :type ctx: `Context`
 
     :param ref: Сообщение (от бота)
     :type ref: `MessageRef`
@@ -1024,7 +1039,7 @@ def list_members_page(ref: MessageRef, member_class: type[OlympMember], page: in
     :type page: `int`
 
     :param member_amount: Количество членов олимпиады
-    :type member_amount: `int``
+    :type member_amount: `int`
 
     :param title: Заголовок сообщения о списке
     :type title: `str`
@@ -1038,7 +1053,7 @@ def list_members_page(ref: MessageRef, member_class: type[OlympMember], page: in
     callback_invalid = f'page_list_{member_class_name}_invalid'
     if member_amount == 0:
         buttons = {'← X': callback_invalid, 'X →': callback_invalid}
-        notifier.edit_text(title, keyboard=inline_keyboard(buttons), ref=ref)
+        ctx.edit_text(title, keyboard=inline_keyboard(buttons), ref=ref)
         return
     max_page = (member_amount-1) // MEMBER_PAGE_SIZE + 1
     if page > max_page:
@@ -1057,22 +1072,22 @@ def list_members_page(ref: MessageRef, member_class: type[OlympMember], page: in
     for member in member_list:
         text += f"\n- {member}"
     text += f"\nЧтобы просмотреть подробную информацию о ком-то одном, используй команду <code>/view_{member_class_name}</code>"
-    notifier.edit_text(text, keyboard=inline_keyboard(buttons), ref=ref)
+    ctx.edit_text(text, keyboard=inline_keyboard(buttons), ref=ref)
 
 
-def list_participants_page(ref: MessageRef, page: int):
+def list_participants_page(ctx: Context, page: int, ref: MessageRef | None = None):
     amount = current_olymp.participants_amount()
     list_members_page(
-        ref, Participant, page, amount,
+        ctx, ref, Participant, page, amount,
         f"В олимпиаде {decline(amount, 'участву', ('ет', 'ют', 'ет'))} {amount} {decline(amount, 'человек', ('', 'а', ''))}",
         lambda start, limit: current_olymp.get_participants(start, limit, sort=True)
     )
 
 
-def list_examiners_page(ref: MessageRef, page: int):
+def list_examiners_page(ctx: Context, page: int, ref: MessageRef | None = None):
     amount = current_olymp.examiners_amount()
     list_members_page(
-        ref, Examiner, page, amount,
+        ctx, ref, Examiner, page, amount,
         f"В олимпиаде {amount} {decline(amount, 'принимающ', ('ий', 'их', 'их'))}",
         lambda start, limit: current_olymp.get_examiners(start, limit, sort=True)
     )
@@ -1082,12 +1097,12 @@ def list_examiners_page(ref: MessageRef, page: int):
 def list_members_command(ctx: Context):
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
-    reply = ctx.reply("Обработка запроса...", keyboard=inline_keyboard({}))
+    reply = ctx.reply("Обработка запроса…", keyboard=inline_keyboard({}))
     command = extract_command(ctx.text)
     if command == 'list_participants':
-        list_participants_page(reply, 1)
+        list_participants_page(ctx, 1, reply)
     else:
-        list_examiners_page(reply, 1)
+        list_examiners_page(ctx, 1, reply)
 
 
 @router.callback(prefix='page_list_')
@@ -1098,9 +1113,9 @@ def list_members_page_handler(ctx: Context):
         return
     page = int(page)
     if member_type == 'participant':
-        list_participants_page(ctx.ref, page)
+        list_participants_page(ctx, page)
     else:
-        list_examiners_page(ctx.ref, page)
+        list_examiners_page(ctx, page)
 
 
 @router.message(commands=['olymp_info'], roles=['owner'])
@@ -1601,7 +1616,7 @@ def examiner_busyness_status(ctx: Context):
             announce_queue_entry(queue_entry)
 
 
-def announce_queue_entry(queue_entry: QueueEntry):
+def announce_queue_entry(queue_entry: QueueEntry): # TODO: Исправить сообщения для краевых случаев при изменении админом
     participant: Participant = Participant.from_id(queue_entry.participant_id)
     problem: Problem = Problem.from_id(queue_entry.problem_id)
     problem_number = participant.get_problem_number(problem)
@@ -1682,7 +1697,7 @@ def announce_queue_entry(queue_entry: QueueEntry):
             participant_response += "\nОлимпиада завершена, можешь отправляться на заслуженный отдых"
             keyboard = participant_keyboard_olymp_finished
         unhandled_queue_left = current_olymp.unhandled_queue_left(finished=True)
-        if current_olymp.status == OlympStatus.CONTEST or unhandled_queue_left:
+        if current_olymp.status == OlympStatus.CONTEST or unhandled_queue_left: # TODO: Проверять точно ли принимающий busy
             examiner_response += "\n❗️ Чтобы продолжить принимать задачи, используй команду /free"
         if new_problem_block:
             notifier.notify_document(
@@ -2097,8 +2112,8 @@ def results_command(ctx: Context):
     JUNIOR_SHEET_NAME = "Результаты 8—9"
     SENIOR_SHEET_NAME = "Результаты 10—11"
     with pd.ExcelWriter(excel_path) as writer:
-        junior_table.to_excel(writer, JUNIOR_SHEET_NAME, index=False, freeze_panes=(1, 3))
-        senior_table.to_excel(writer, SENIOR_SHEET_NAME, index=False, freeze_panes=(1, 3))
+        junior_table.to_excel(writer, sheet_name=JUNIOR_SHEET_NAME, index=False, freeze_panes=(1, 3))
+        senior_table.to_excel(writer, sheet_name=SENIOR_SHEET_NAME, index=False, freeze_panes=(1, 3))
         book = writer.book
         for sheetname in book.sheetnames:
             sheet = book[sheetname]
