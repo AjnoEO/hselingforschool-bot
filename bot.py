@@ -22,7 +22,7 @@ from tag import Tag
 from problem import Problem, ProblemBlock, BlockType
 from queue_entry import QueueEntry, QueueStatus
 from utils import (
-    UserError, decline, escape_html, extract_command, get_arg, get_n_args,
+    UserError, MultiError, decline, escape_html, extract_command, get_arg, get_n_args,
     get_tags_args, save_downloaded_file,
 )
 import pandas as pd
@@ -430,9 +430,7 @@ def start_olymp():
                 f"Если у тебя возникли вопросы, обращайся к "
                 f"{' или '.join(ASK_PEOPLE_HANDLES.get(platform, []))} (организационные вопросы) "
                 f"или к {OWNER_HANDLES[platform]} (функционирование бота)")
-    err_amount = 0
-    receivers = 0
-    send_error = None
+    error_list: list[Exception] = []
     for p in participants:
         if p.external_id:
             try:
@@ -449,32 +447,30 @@ def start_olymp():
                     keyboard=participant_keyboard,
                     show_caption_above_media=True
                 )
-                receivers += 1
             except Exception as exc:
-                err_amount += 1
-                send_error = exc
+                error_list.append(exc)
     examiners = current_olymp.get_examiners()
     for e in examiners:
         if e.external_id:
             state_store.delete(e.platform, e.external_id)
-            try:
-                notifier.notify(
-                    e,
-                    "Олимпиада началась! Напиши /free и ожидай участников\nСписок команд: /help",
-                    keyboard=REMOVE_KEYBOARD,
-                )
-                receivers += 1
-            except Exception as exc:
-                err_amount += 1
-                send_error = exc
+    try:
+        notifier.notify_many(
+            examiners,
+            "Олимпиада началась! Напиши /free и ожидай участников\nСписок команд: /help",
+            keyboard=REMOVE_KEYBOARD,
+        )
+    except MultiError as exc:
+        error_list.extend(exc.error_list)
     owner_message = f"Олимпиада <em>{current_olymp.name}</em> начата"
-    if err_amount:
+    if error_list:
         owner_message += (
-            f"\n⚠️ Не удалось доставить сообщение {err_amount} {decline(err_amount, 'пользовател', ('ю', 'ям', 'ям'))}"
+            f"\n⚠️ Не удалось доставить сообщение "
+            f"{len(error_list)} {decline(len(error_list), 'пользовател', ('ю', 'ям', 'ям'))}"
         )
     notifier.send_text(OWNER_PLATFORM, OWNER_ID, owner_message)
-    if err_amount and (err_amount > receivers / 2):
-        raise send_error
+    send_error = MultiError(error_list, "при рассылке сообщений")
+    if send_error and (len(send_error) * 3 > len(examiners) + len(participants)):
+        send_error.clean_raise()
 
 
 @router.message(commands=['olymp_start'], roles=['owner'])
@@ -554,20 +550,15 @@ def finish_olymp():
             f"Олимпиада частично завершена, {decline(participants_left, 'продолжа', ('ет', 'ют', 'ют'))} "
             f"участие {participants_left} {decline(participants_left, 'участник', ('', 'а', 'ов'))}"
         )
-    receivers = 0
-    err_amount = 0
-    send_error = None
-    for e in current_olymp.get_examiners():
-        if e.external_id:
-            try:
-                notifier.notify(e, e_message)
-                receivers += 1
-            except Exception as exc:
-                err_amount += 1
-                send_error = exc
+    send_error: MultiError | None = None
+    current_examiners = current_olymp.get_examiners()
+    try:
+        notifier.notify_many(current_examiners, e_message)
+    except MultiError as exc:
+        send_error = exc
     notifier.send_text(OWNER_PLATFORM, OWNER_ID, owner_message)
-    if err_amount and (err_amount > receivers / 2):
-        raise send_error
+    if send_error and (len(send_error) * 3 > len(current_examiners)):
+        send_error.clean_raise()
 
 
 @router.message(commands=['olymp_finish'], roles=['owner'])
@@ -589,14 +580,11 @@ def olymp_finish(ctx: Context):
             raise UserError("По указанным фильтрам нет участников, для которых олимпиада ещё не завершена")
         else:
             return finish_olymp()
-    examiners = current_olymp.get_examiners()
     p_not_in_queue_message = ("Олимпиада завершилась! Больше записываться в очередь нельзя. "
                               "Можешь отправляться на заслуженный отдых")
     p_in_queue_message = ("Олимпиада завершилась! Больше записываться в очередь нельзя, "
                           "но тех, кто уже записался, мы проверим, так что не уходи")
-    err_amount = 0
-    receivers = 0
-    send_error = None
+    error_list: list[Exception] = []
     for p in participants:
         p.finished = True
         if p.external_id:
@@ -607,10 +595,8 @@ def olymp_finish(ctx: Context):
                     p_in_queue_message if is_in_queue else p_not_in_queue_message,
                     keyboard = None if is_in_queue else participant_keyboard_olymp_finished
                 )
-                receivers += 1
             except Exception as exc:
-                err_amount += 1
-                send_error = exc
+                error_list.append(exc)
     if current_olymp.unhandled_queue_left(finished=True):
         participants_left = current_olymp.participants_amount(finished=False)
         if participants_left == 0:
@@ -623,17 +609,15 @@ def olymp_finish(ctx: Context):
         e_message += ("Но мы ещё работаем с очередью, так что не уходи раньше времени. "
                       "Если ты завершил(-а) проверку, и даже в статусе /free к тебе никто "
                       "не идёт — тогда можешь идти отдыхать")
-        for e in examiners:
-            if e.external_id:
-                try:
-                    notifier.notify(e, e_message)
-                    receivers += 1
-                except Exception as exc:
-                    err_amount += 1
-                    send_error = exc
+        examiners = current_olymp.get_examiners()
+        try:
+            notifier.notify_many(examiners, e_message)
+        except MultiError as exc:
+            error_list.extend(exc.error_list)
         ctx.reply(owner_message)
-        if err_amount and (err_amount > receivers / 2):
-            raise send_error
+        send_error = MultiError(error_list, "при рассылке сообщений")
+        if send_error and (len(send_error) * 3 > len(examiners) + len(participants)):
+            send_error.clean_raise()
     else:
         finish_olymp()
 

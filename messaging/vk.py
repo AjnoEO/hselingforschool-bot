@@ -3,11 +3,13 @@ import os
 import secrets
 import tempfile
 from html.parser import HTMLParser
+from utils import MultiError
 
 import requests
 from vk_api import VkApi
 from vk_api.keyboard import VkKeyboard
 from vk_api.upload import VkUpload
+from vk_api.exceptions import VkApiError
 
 from enums import Platform
 from .base import Messenger
@@ -106,11 +108,11 @@ class VkMessenger(Messenger):
             return file.name, file.name
         raise ValueError("У медиа нет ни пути, ни данных")
 
-    def __send(self, peer_id: int, text: str, *, attachment: str | None = None,
+    def __send(self, peer_id: int | list[int], text: str, *, attachment: str | None = None,
                keyboard: Keyboard | RemoveKeyboard | None = None,
                reply_to: MessageRef | None = None) -> MessageRef:
         params = {
-            "peer_id": peer_id,
+            "peer_ids" if isinstance(peer_id, list) else "peer_id": peer_id,
             "message": html_to_vk(text),
             "random_id": secrets.randbelow(2 ** 31),
         }
@@ -123,12 +125,40 @@ class VkMessenger(Messenger):
             # TODO: проверить, что VK ждёт именно conversation_message_id, а не глобальный id
             params["reply_to"] = reply_to.message_id
         # TODO: обрабатывать ошибки VK, лимиты длины (MAX_MESSAGE_LENGTH) и повторы
-        message_id = self.api.messages.send(**params)
-        self.__texts[(peer_id, message_id)] = text
-        return MessageRef(peer_id, message_id, Platform.VK)
+        api_response = self.api.messages.send(**params)
+        if isinstance(peer_id, list):
+            messages: list[MessageRef] = []
+            error_list: list[VkApiError] = []
+            for message_obj in api_response:
+                if "error" in message_obj:
+                    error_list.append(VkApiError(message_obj["error"]))
+                    continue
+                self.__texts[(message_obj["peer_id"], message_obj["message_id"])] = text
+                messages.append(MessageRef(message_obj["peer_id"], message_obj["message_id"], Platform.VK))
+            multierror = MultiError(error_list, "при рассылке сообщений")
+            multierror.clean_raise()
+            return messages
+        self.__texts[(peer_id, api_response)] = text
+        return MessageRef(peer_id, api_response, Platform.VK)
 
-    def send_text(self, peer_id, text, *, keyboard=None, reply_to=None) -> MessageRef:
+    def send_text(
+        self,
+        peer_id: int,
+        text: str,
+        *,
+        keyboard: Keyboard | RemoveKeyboard | None = None,
+        reply_to: MessageRef | None = None
+    ) -> MessageRef:
         return self.__send(peer_id, text, keyboard=keyboard, reply_to=reply_to)
+    
+    def send_texts(
+        self,
+        peer_ids: list[int],
+        text: str,
+        *,
+        keyboard: Keyboard | RemoveKeyboard | None = None
+    ) -> list[MessageRef]:
+        return self.__send(peer_ids, text, keyboard=keyboard)
 
     def __upload_photo(self, path: str, peer_id: int) -> dict:
         # VkUpload.photo_messages sends the file as "file0", but VK's messages

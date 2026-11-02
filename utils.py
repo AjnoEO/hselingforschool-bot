@@ -5,7 +5,6 @@ import os
 import secrets
 from functools import wraps
 from db import db_connection
-from messaging.text import extract_command
 
 
 class UserError(Exception):
@@ -29,8 +28,35 @@ def decline(numeral: int, stem: str, endings: tuple[str, str, str]):
     return stem + endings[2]
 
 
+class MultiError(Exception):
+    def __init__(self, error_list: list[Exception], *args):
+        super().__init__(f"{len(error_list)} {decline(len(error_list), 'ошиб', ('ка', 'ки', 'ок'))}", *args)
+        self.error_list = error_list
+
+    def __bool__(self):
+        return bool(self.error_list)
+
+    def __len__(self):
+        return len(self.error_list)
+
+    def clean_raise(self):
+        if not self:
+            return
+        if len(self) == 1:
+            raise self.error_list[0]
+        raise self from self.error_list[0]
+
+
 def escape_html(text: str):
     return html.escape(text, quote=False)
+
+
+def extract_command(text: str | None) -> str | None:
+    """Вернуть команду без слэша и без @botname"""
+    if not text or not text.startswith("/"):
+        return None
+    command = text.split(maxsplit=1)[0][1:]
+    return command.split("@", 1)[0]
 
 
 def get_arg(text: str, no_arg_error: str):

@@ -20,6 +20,15 @@ class Messenger:
     ) -> MessageRef:
         raise NotImplementedError
 
+    def send_texts(
+        self,
+        peer_ids: list[int],
+        text: str,
+        *,
+        keyboard: Keyboard | RemoveKeyboard | None = None,
+    ) -> list[MessageRef]:
+        raise NotImplementedError
+
     def send_photo(
         self,
         peer_id: int,

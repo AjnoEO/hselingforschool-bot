@@ -1,7 +1,7 @@
 from .context import Context
 
 import re
-from .text import extract_command
+from utils import extract_command
 from typing import Any
 
 

@@ -1,3 +1,5 @@
+from typing import DefaultDict
+from utils import MultiError
 from enums import Platform
 from .base import Messenger
 from .types import Keyboard, Media, MessageRef, RemoveKeyboard
@@ -41,6 +43,30 @@ class MessengerRegistry:
         return self.for_platform(user.platform).send_text(
             user.external_id, text, keyboard=keyboard
         )
+    
+    def notify_many(
+        self,
+        users,
+        text: str,
+        *,
+        keyboard: Keyboard | RemoveKeyboard | None = None,
+        only_registered: bool = True   
+    ) -> list[MessageRef]:
+        platform_to_user_ids: DefaultDict[Platform, list] = DefaultDict(lambda: [])
+        error_list: list[Exception] = []
+        for user in users:
+            try:
+                self.__check_user(user)
+                platform_to_user_ids[user.platform].append(user.external_id)
+            except ValueError as exc:
+                if not only_registered: error_list.append(exc)
+        for platform, user_ids in platform_to_user_ids.items():
+            try:
+                self.for_platform(platform).send_texts(user_ids, text, keyboard=keyboard)
+            except MultiError as new_multierror:
+                error_list.extend(new_multierror.error_list)
+        multierror = MultiError(error_list, "при рассылке сообщений")
+        multierror.clean_raise()
 
     def send_photo(
         self,

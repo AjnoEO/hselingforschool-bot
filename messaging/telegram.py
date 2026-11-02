@@ -11,6 +11,7 @@ from telebot.types import (
 )
 from .base import Messenger
 from .types import Document, Keyboard, Media, MessageRef, RemoveKeyboard
+from utils import MultiError
 
 
 class TelegramMessenger(Messenger):
@@ -59,6 +60,23 @@ class TelegramMessenger(Messenger):
             reply_to_message_id=reply_to.message_id if reply_to else None,
         )
         return self.ref_for(message)
+    
+    def send_texts(
+        self,
+        peer_ids: list[int],
+        text: str,
+        *,
+        keyboard: Keyboard | RemoveKeyboard | None = None
+    ) -> list[MessageRef]:
+        messages: list[MessageRef] = []
+        error_list: list[Exception] = []
+        for peer_id in peer_ids:
+            try:
+                messages.append(self.send_text(peer_id, text, keyboard=keyboard))
+            except Exception as exc:
+                error_list.append(exc)
+        multierror = MultiError(error_list, "при рассылке сообщений")
+        multierror.clean_raise()
 
     def send_photo(
         self,
