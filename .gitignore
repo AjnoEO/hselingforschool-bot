@@ -19,6 +19,7 @@ __pycache__
 # Локальное
 .venv
 .vscode
+logs.*
 
 # Тестовые файлы
 test_files
