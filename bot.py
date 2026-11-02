@@ -2164,15 +2164,17 @@ def other_commands(ctx: Context):
 @router.message(roles=['not owner'])
 def other_messages(ctx: Context):
     if not current_olymp:
-        refer_to_people = False
+        return
     elif current_olymp.status == OlympStatus.REGISTRATION:
         refer_to_people = True
-    elif (current_olymp.status in [OlympStatus.CONTEST, OlympStatus.QUEUE]
-          and (p := Participant.from_external_id(ctx.platform, ctx.sender_id, current_olymp.id, no_error=True))
-          and (p.queue_entry or not p.finished)):
-        refer_to_people = True
+    elif current_olymp.status in [OlympStatus.CONTEST, OlympStatus.QUEUE]:
+        if ((p := Participant.from_external_id(ctx.platform, ctx.sender_id, current_olymp.id, no_error=True))
+            and (p.queue_entry or not p.finished)):
+            refer_to_people = True
+        else:
+            refer_to_people = False
     else:
-        refer_to_people = False
+        return
     
     error_message = ("Неизвестная команда\n"
                      "Если у тебя есть организационные вопросы об олимпиаде, ")
