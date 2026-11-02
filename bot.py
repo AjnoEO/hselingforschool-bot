@@ -291,6 +291,7 @@ def send_authentication_confirmation(member: OlympMember, *, already_authenticat
         response += "\n❗️ Олимпиада уже началась!"
     notifier.notify(member, response)
     if current_olymp.status == OlympStatus.CONTEST and isinstance(member, Participant) and not member.finished:
+        send_all_problem_blocks(member)
         notifier.notify_photo(
             member,
             Media(BUTTONS_IMG, filename="Где_кнопки.png"),
@@ -298,7 +299,6 @@ def send_authentication_confirmation(member: OlympMember, *, already_authenticat
             keyboard=participant_keyboard,
             show_caption_above_media=True
         )
-        send_all_problem_blocks(member)
 
 
 def send_all_problem_blocks(participant: Participant):
