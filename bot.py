@@ -436,18 +436,18 @@ def start_olymp():
     for p in participants:
         if p.external_id:
             try:
+                problem_block = p.last_block
+                notifier.notify_document(
+                    p,
+                    Media(problem_block.path or ProblemBlock.DEFAULT_PATH, filename="Блок_1.pdf"),
+                    caption=participant_start_message(p.platform)
+                )
                 notifier.notify_photo(
                     p,
                     Media(BUTTONS_IMG, filename="Где_кнопки.png"),
                     caption=BUTTON_HELP,
                     keyboard=participant_keyboard,
                     show_caption_above_media=True
-                )
-                problem_block = p.last_block
-                notifier.notify_document(
-                    p,
-                    Media(problem_block.path or ProblemBlock.DEFAULT_PATH, filename="Блок_1.pdf"),
-                    caption=participant_start_message(p.platform)
                 )
                 receivers += 1
             except Exception as exc:
@@ -556,13 +556,15 @@ def finish_olymp():
         )
     receivers = 0
     err_amount = 0
+    send_error = None
     for e in current_olymp.get_examiners():
         if e.external_id:
             try:
                 notifier.notify(e, e_message)
                 receivers += 1
-            except Exception as send_error:
+            except Exception as exc:
                 err_amount += 1
+                send_error = exc
     notifier.send_text(OWNER_PLATFORM, OWNER_ID, owner_message)
     if err_amount and (err_amount > receivers / 2):
         raise send_error
@@ -594,6 +596,7 @@ def olymp_finish(ctx: Context):
                           "но тех, кто уже записался, мы проверим, так что не уходи")
     err_amount = 0
     receivers = 0
+    send_error = None
     for p in participants:
         p.finished = True
         if p.external_id:
@@ -605,8 +608,9 @@ def olymp_finish(ctx: Context):
                     keyboard = None if is_in_queue else participant_keyboard_olymp_finished
                 )
                 receivers += 1
-            except Exception as send_error:
+            except Exception as exc:
                 err_amount += 1
+                send_error = exc
     if current_olymp.unhandled_queue_left(finished=True):
         participants_left = current_olymp.participants_amount(finished=False)
         if participants_left == 0:
@@ -624,8 +628,9 @@ def olymp_finish(ctx: Context):
                 try:
                     notifier.notify(e, e_message)
                     receivers += 1
-                except Exception as send_error:
+                except Exception as exc:
                     err_amount += 1
+                    send_error = exc
         ctx.reply(owner_message)
         if err_amount and (err_amount > receivers / 2):
             raise send_error
@@ -1939,33 +1944,37 @@ def give_out_problem_block(ctx: Context):
     issues_no_prev = 0
     issues_contact = 0
     receivers = 0
+    send_error = None
     for p in participants:
         last_block_number = p.last_block_number
         if last_block_number < new_problem_block_number - 1:
             issues_no_prev += 1
-        if last_block_number < new_problem_block_number:
-            receivers += 1
-            new_problem_block = p.give_next_problem_block()
-            if p.external_id:
-                participant_reply = (
-                    f"Тебе выдан {'второй' if last_block_number + 1 == 2 else 'завершающий третий'} блок задач. "
-                    f"Теперь можешь решать и сдавать их тоже!"
-                )
-                if PROMOTE_COMMANDS:
-                    participant_reply += (f"\nЧтобы записаться на сдачу задачи, используй команду <code>"
-                                          + escape_html("/queue <номер задачи>")
-                                          + "</code>")
-                try:
-                    notifier.notify_document(
-                        p,
-                        Media(
-                            new_problem_block.path or ProblemBlock.DEFAULT_PATH,
-                            filename=f"Блок_{last_block_number + 1}.pdf"
-                        ),
-                        caption=participant_reply
-                    )
-                except Exception as send_error:
-                    issues_contact += 1
+        if last_block_number >= new_problem_block_number:
+            continue
+        receivers += 1
+        new_problem_block = p.give_next_problem_block()
+        if p.external_id is None:
+            continue
+        participant_reply = (
+            f"Тебе выдан {'второй' if last_block_number + 1 == 2 else 'завершающий третий'} блок задач. "
+            f"Теперь можешь решать и сдавать их тоже!"
+        )
+        if PROMOTE_COMMANDS:
+            participant_reply += (f"\nЧтобы записаться на сдачу задачи, используй команду <code>"
+                                    + escape_html("/queue <номер задачи>")
+                                    + "</code>")
+        try:
+            notifier.notify_document(
+                p,
+                Media(
+                    new_problem_block.path or ProblemBlock.DEFAULT_PATH,
+                    filename=f"Блок_{last_block_number + 1}.pdf"
+                ),
+                caption=participant_reply
+            )
+        except Exception as exc:
+            issues_contact += 1
+            send_error = exc
     owner_reply = (f"{'Второй' if new_problem_block_number == 2 else 'Третий'} блок задач выдан "
                    f"{receivers} {decline(receivers, 'участник', ('у', 'ам', 'ам'))}")
     if issues_no_prev:
@@ -2051,14 +2060,16 @@ def announce_command(ctx: Context):
     p_amount = 0
     e_amount = 0
     err_amount = 0
+    send_error = None
     if send_to_participants:
         for p in current_olymp.get_participants(include_tags=include_tags, exclude_tags=exclude_tags):
             if p.external_id:
                 try:
                     ctx.copy_to(p, announcement)
                     p_amount += 1
-                except Exception as send_error:
+                except Exception as exc:
                     err_amount += 1
+                    send_error = exc
         owner_response += f"{p_amount} {decline(p_amount, 'участник', ('', 'а', 'ов'))}"
     if send_to_participants and send_to_examiners:
         owner_response += " и "
@@ -2068,8 +2079,9 @@ def announce_command(ctx: Context):
                 try:
                     ctx.copy_to(e, announcement)
                     e_amount += 1
-                except Exception as send_error:
+                except Exception as exc:
                     err_amount += 1
+                    send_error = exc
         owner_response += f"{e_amount} {decline(e_amount, 'принимающ', ('ий', 'их', 'их'))}"
     owner_response += " получил" + ("и" if p_amount + e_amount > 1 else "") + " оповещение!"
     if err_amount:
