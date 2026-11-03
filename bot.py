@@ -595,31 +595,30 @@ def olymp_finish(ctx: Context):
         notifier.notify_many(participants, p_message, keyboard=p_keyboard)
     except MultiError as exc:
         error_list.extend(exc.error_list)
-    if current_olymp.unhandled_queue_left(finished=True):
-        participants_left = current_olymp.participants_amount(finished=False)
-        if participants_left == 0:
-            current_olymp.status = OlympStatus.QUEUE
-            e_message = "Олимпиада завершилась! "
-            owner_message = "Олимпиада завершена. Идёт работа с очередью"
-        else:
-            e_message = "Олимпиада частично завершилась! "
-            owner_message = "Олимпиада завершена для части участников. Идёт работа с очередью"
-        e_message += ("Но мы ещё работаем с очередью, так что не уходи раньше времени. "
-                      "Если ты завершил(-а) проверку, и даже в статусе /free к тебе никто "
-                      "не идёт — тогда можешь идти отдыхать")
-        examiners = current_olymp.get_examiners()
-        try:
-            notifier.notify_many(examiners, e_message)
-        except MultiError as exc:
-            error_list.extend(exc.error_list)
-        ctx.reply(owner_message)
-        send_error = MultiError(error_list, "при рассылке сообщений")
-        if len(send_error) * 3 > len(examiners) + len(participants):
-            send_error.clean_raise()
-        elif send_error:
-            raise UserError(*send_error.args, ignore=True) from error_list[0]
+    if not current_olymp.unhandled_queue_left(finished=True):
+        return finish_olymp()
+    participants_left = current_olymp.participants_amount(finished=False)
+    if participants_left == 0:
+        current_olymp.status = OlympStatus.QUEUE
+        e_message = "Олимпиада завершилась! "
+        owner_message = "Олимпиада завершена. Идёт работа с очередью"
     else:
-        finish_olymp()
+        e_message = "Олимпиада частично завершилась! "
+        owner_message = "Олимпиада завершена для части участников. Идёт работа с очередью"
+    e_message += ("Но мы ещё работаем с очередью, так что не уходи раньше времени. "
+                  "Если ты завершил(-а) проверку, и даже в статусе /free к тебе никто "
+                  "не идёт — тогда можешь идти отдыхать")
+    examiners = current_olymp.get_examiners()
+    try:
+        notifier.notify_many(examiners, e_message)
+    except MultiError as exc:
+        error_list.extend(exc.error_list)
+    ctx.reply(owner_message)
+    send_error = MultiError(error_list, "при рассылке сообщений")
+    if len(send_error) * 3 > len(examiners) + len(participants):
+        send_error.clean_raise()
+    elif send_error:
+        raise UserError(*send_error.args, ignore=True) from error_list[0]
 
 
 @router.message(commands=['olymp_list'], roles=['owner'])
