@@ -41,12 +41,25 @@ class Media:
         self,
         path: str | None = None,
         *,
+        is_img: bool = True,
         data: bytes | None = None,
         filename: str | None = None,
     ):
         self.path: str | None = path
+        self.is_img: bool = is_img
         self.data: bytes | None = data # TODO: Точно надо?
         self.filename: str | None = filename
+
+
+class FileMedia(Media):
+    def __init__(
+            self,
+            path: str | None = None,
+            *,
+            data: bytes | None = None,
+            filename = None
+    ):
+        super().__init__(path, is_img=False, data=data, filename=filename)
 
 
 class Document:

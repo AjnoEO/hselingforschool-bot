@@ -14,7 +14,7 @@ from data import (
 from enums import Platform
 from olymp import Olymp, OlympStatus
 from messaging import (
-    Button, Context, ConversationState, Keyboard, Media, MessageRef, Event,
+    Button, Context, ConversationState, Keyboard, Media, FileMedia, MessageRef, Event,
     MessengerRegistry, REMOVE_KEYBOARD, Router, StateStore, inline_keyboard,
 )
 from users import User, OlympMember, Participant, Examiner
@@ -91,10 +91,11 @@ def handle_event(event):
         with dispatch_lock:
             handler(ctx)
     except UserError as exc:
+        if exc.ignore: return
         error_message = "\u26a0\ufe0f Ошибка!\n" + str(exc)
         if not ctx.is_owner and exc.contact_note:
             error_message += f"\nЕсли тебе кажется, что это баг, сообщи {OWNER_HANDLES[ctx.platform]}"
-        ctx.messenger.send_text(ctx.peer_id, error_message, keyboard=exc.reply_markup)
+        ctx.messenger.send(ctx.peer_id, error_message, keyboard=exc.reply_markup)
     except Exception as exc:
         tb = traceback.extract_tb(exc.__traceback__)[-1]
         error_message = (
@@ -106,7 +107,7 @@ def handle_event(event):
         if not ctx.is_owner:
             error_message += f"\nЕсли тебе кажется, что это баг, сообщи {OWNER_HANDLES[ctx.platform]}"
         print(exc)
-        ctx.messenger.send_text(ctx.peer_id, error_message)
+        ctx.messenger.send(ctx.peer_id, error_message)
         raise
     finally:
         # VK requires an answer for every message_event, otherwise the client spins forever
@@ -292,10 +293,9 @@ def send_authentication_confirmation(member: OlympMember, *, already_authenticat
     notifier.notify(member, response)
     if current_olymp.status == OlympStatus.CONTEST and isinstance(member, Participant) and not member.finished:
         send_all_problem_blocks(member)
-        notifier.notify_photo(
-            member,
+        notifier.notify(
+            member, BUTTON_HELP,
             Media(BUTTONS_IMG, filename="Где_кнопки.png"),
-            caption=BUTTON_HELP,
             keyboard=participant_keyboard,
             show_caption_above_media=True
         )
@@ -304,9 +304,9 @@ def send_authentication_confirmation(member: OlympMember, *, already_authenticat
 def send_all_problem_blocks(participant: Participant):
     for problem_block_number in range(1, participant.last_block_number+1):
         problem_block = participant.problem_block_from_number(problem_block_number)
-        notifier.notify_document(
+        notifier.notify(
             participant,
-            Media(problem_block.path or ProblemBlock.DEFAULT_PATH, filename=f"Блок_{problem_block_number}.pdf")
+            FileMedia(problem_block.path or ProblemBlock.DEFAULT_PATH, filename=f"Блок_{problem_block_number}.pdf")
         )
 
 
@@ -433,15 +433,13 @@ def start_olymp():
         if p.external_id:
             try:
                 problem_block = p.last_block
-                notifier.notify_document(
-                    p,
-                    Media(problem_block.path or ProblemBlock.DEFAULT_PATH, filename="Блок_1.pdf"),
-                    caption=participant_start_message(p.platform)
+                notifier.notify(
+                    p, participant_start_message(p.platform),
+                    media=FileMedia(problem_block.path or ProblemBlock.DEFAULT_PATH, filename="Блок_1.pdf")
                 )
-                notifier.notify_photo(
-                    p,
-                    Media(BUTTONS_IMG, filename="Где_кнопки.png"),
-                    caption=BUTTON_HELP,
+                notifier.notify(
+                    p, BUTTON_HELP,
+                    media=Media(BUTTONS_IMG, filename="Где_кнопки.png"),
                     keyboard=participant_keyboard,
                     show_caption_above_media=True
                 )
@@ -465,10 +463,12 @@ def start_olymp():
             f"\n⚠️ Не удалось доставить сообщение "
             f"{len(error_list)} {decline(len(error_list), 'пользовател', ('ю', 'ям', 'ям'))}"
         )
-    notifier.send_text(OWNER_PLATFORM, OWNER_ID, owner_message)
+    notifier.send(OWNER_PLATFORM, OWNER_ID, owner_message)
     send_error = MultiError(error_list, "при рассылке сообщений")
-    if send_error and (len(send_error) * 3 > len(examiners) + len(participants)):
+    if len(send_error) * 3 > len(examiners) + len(participants):
         send_error.clean_raise()
+    elif send_error:
+        raise UserError(*send_error.args, ignore=True) from error_list[0]
 
 
 @router.message(commands=['olymp_start'], roles=['owner'])
@@ -548,15 +548,17 @@ def finish_olymp():
             f"Олимпиада частично завершена, {decline(participants_left, 'продолжа', ('ет', 'ют', 'ют'))} "
             f"участие {participants_left} {decline(participants_left, 'участник', ('', 'а', 'ов'))}"
         )
-    send_error: MultiError | None = None
+    send_error: MultiError = MultiError([])
     current_examiners = current_olymp.get_examiners()
     try:
         notifier.notify_many(current_examiners, e_message)
     except MultiError as exc:
         send_error = exc
-    notifier.send_text(OWNER_PLATFORM, OWNER_ID, owner_message)
-    if send_error and (len(send_error) * 3 > len(current_examiners)):
+    notifier.send(OWNER_PLATFORM, OWNER_ID, owner_message)
+    if len(send_error) * 3 > len(current_examiners):
         send_error.clean_raise()
+    elif send_error:
+        raise UserError(*send_error.args, ignore=True) from send_error.error_list[0]
 
 
 @router.message(commands=['olymp_finish'], roles=['owner'])
@@ -612,8 +614,10 @@ def olymp_finish(ctx: Context):
             error_list.extend(exc.error_list)
         ctx.reply(owner_message)
         send_error = MultiError(error_list, "при рассылке сообщений")
-        if send_error and (len(send_error) * 3 > len(examiners) + len(participants)):
+        if len(send_error) * 3 > len(examiners) + len(participants):
             send_error.clean_raise()
+        elif send_error:
+            raise UserError(*send_error.args, ignore=True) from error_list[0]
     else:
         finish_olymp()
 
@@ -1444,10 +1448,9 @@ def problem_block_info(ctx: Context):
     for problem in problem_block.problems:
         response += f"\n- <code>{problem.id}</code> {problem}"
     if problem_block.path:
-        ctx.send_document(
-            ctx.peer_id,
-            Media(problem_block.path, filename=f"Блок_{problem_block.id}.pdf"),
-            caption=response
+        ctx.send(
+            ctx.peer_id, response,
+            media=FileMedia(problem_block.path, filename=f"Блок_{problem_block.id}.pdf")
         )
     else:
         response += "\nФайл не назначен"
@@ -1535,7 +1538,7 @@ def delete_block_handler(ctx: Context):
     problem_block_id = int(ctx.data[len('delete_block_'):])
     problem_block = ProblemBlock.from_id(problem_block_id)
     problem_block.delete()
-    ctx.send_text(ctx.sender_id, f"Блок {problem_block} удалён")
+    ctx.send(ctx.sender_id, f"Блок {problem_block} удалён")
 
 
 @router.message(commands=['choose_problems'], roles=['examiner'], olymp_statuses=[OlympStatus.REGISTRATION])
@@ -1669,7 +1672,7 @@ def announce_queue_entry(queue_entry: QueueEntry): # TODO: Исправить с
                                          "для тебя олимпиада завершена, можешь отправляться на заслуженный отдых")
                 participant.finished = True
                 notifier.notify(participant, participant_response, keyboard=participant_keyboard_olymp_finished)
-                notifier.send_text(OWNER_PLATFORM, OWNER_ID, f"Участник {participant} завершил олимпиаду!")
+                notifier.send(OWNER_PLATFORM, OWNER_ID, f"Участник {participant} завершил олимпиаду!")
                 if current_olymp.participants_amount(finished=False) == 0:
                     finish_olymp()
                 return
@@ -1685,13 +1688,12 @@ def announce_queue_entry(queue_entry: QueueEntry): # TODO: Исправить с
         if current_olymp.status == OlympStatus.CONTEST or unhandled_queue_left: # TODO: Проверять точно ли принимающий busy
             examiner_response += "\n❗️ Чтобы продолжить принимать задачи, используй команду /free"
         if new_problem_block:
-            notifier.notify_document(
-                participant,
-                Media(
+            notifier.notify(
+                participant, participant_response,
+                media=FileMedia(
                     new_problem_block.path or ProblemBlock.DEFAULT_PATH,
                     filename=f"Блок_{participant.last_block_number}.pdf"
                 ),
-                caption=participant_response,
                 keyboard=keyboard
             )
         else:
@@ -1777,7 +1779,7 @@ def examiner_didnt_come_handler(ctx: Context):
     queue_entry = participant.queue_entry
     owner_message = (f"{participant} пожаловался(-лась), что принимающего {examiner} не было на приёме задачи "
                      f"(запись в очереди: <code>{queue_entry.id}</code>)")
-    notifier.send_text(OWNER_PLATFORM, OWNER_ID, owner_message)
+    notifier.send(OWNER_PLATFORM, OWNER_ID, owner_message)
     ctx.answer("Мы сообщили организаторам о проблеме")
     return_participant_to_queue(participant)
 
@@ -1944,13 +1946,12 @@ def give_out_problem_block(ctx: Context):
                                     + escape_html("/queue <номер задачи>")
                                     + "</code>")
         try:
-            notifier.notify_document(
-                p,
-                Media(
+            notifier.notify(
+                p, participant_reply,
+                FileMedia(
                     new_problem_block.path or ProblemBlock.DEFAULT_PATH,
                     filename=f"Блок_{last_block_number + 1}.pdf"
-                ),
-                caption=participant_reply
+                )
             )
         except Exception as exc:
             issues_contact += 1
@@ -1989,13 +1990,12 @@ def give_problem_block(ctx: Context):
         participant_reply += ("\nЧтобы записаться на сдачу задачи, используй команду <code>"
                               + escape_html("/queue <номер задачи>")
                               + "</code>")
-    notifier.notify_document(
-        participant,
-        Media(
+    notifier.notify(
+        participant, participant_reply,
+        media=FileMedia(
             problem_block.path or ProblemBlock.DEFAULT_PATH,
             filename=f"Блок_{participant.last_block_number}.pdf"
-        ),
-        caption=participant_reply
+        )
     )
     ctx.reply(
         f"{'Второй' if new_problem_block_number == 2 else 'Третий'} блок задач выдан участнику {participant}"
@@ -2018,7 +2018,7 @@ def send_command(ctx: Context):
         raise UserError(f"{member} не авторизован(-а). Невозможно переслать сообщение…")
     message_to_send_ref = message_to_send
     ctx.copy_to(member, message_to_send_ref)
-    ctx.send_text(
+    ctx.send(
         ctx.peer_id,
         f"{member_class_name} {member} получил оповещение!",
         reply_to=message_to_send_ref
@@ -2068,7 +2068,7 @@ def announce_command(ctx: Context):
         owner_response += (
             f"\n⚠️ Не удалось доставить сообщение {err_amount} {decline(err_amount, 'пользовател', ('ю', 'ям', 'ям'))}"
         )
-    ctx.send_text(ctx.peer_id, owner_response, reply_to=announcement)
+    ctx.send(ctx.peer_id, owner_response, reply_to=announcement)
     if err_amount and (err_amount > (p_amount + e_amount) / 2):
         raise send_error
 
@@ -2118,10 +2118,9 @@ def results_command(ctx: Context):
                 if column_name in ['ID', 'Сумма']:
                     for cell in sheet[col_letter]:
                         cell.font = Font(bold=True)
-    ctx.send_document(
-        ctx.peer_id,
-        Media(excel_path, filename=f"{current_olymp.name.replace(' ', '_')}_результаты.xlsx"),
-        caption="Результаты олимпиады"
+    ctx.send(
+        ctx.peer_id, "Результаты олимпиады",
+        media=FileMedia(excel_path, filename=f"{current_olymp.name.replace(' ', '_')}_результаты.xlsx")
     )
 
 
@@ -2193,7 +2192,7 @@ def main():
             + escape_html("/olymp_select <название>")
             + "</code>")
     try:
-        notifier.send_text(OWNER_PLATFORM, OWNER_ID, owner_startup_message)
+        notifier.send(OWNER_PLATFORM, OWNER_ID, owner_startup_message)
     except Exception as e:
         print("! Не удалось оповестить владельца. Проверь owner_id в файле config.ini")
 

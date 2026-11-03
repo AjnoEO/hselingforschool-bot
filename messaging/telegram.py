@@ -45,71 +45,62 @@ class TelegramMessenger(Messenger):
             return InputFile(media.path, media.filename)
         return InputFile(media.data, media.filename)
 
-    def send_text( # TODO: Дробить длинные сообщения
+    def send( # TODO: Дробить длинные сообщения
         self,
         peer_id: int,
         text: str,
         *,
+        media: Media | None = None,
         keyboard: Keyboard | RemoveKeyboard | None = None,
         reply_to: MessageRef | None = None,
+        show_caption_above_media: bool = False
     ) -> MessageRef:
-        message = self.bot.send_message(
-            peer_id,
-            text,
-            reply_markup=self.__markup(keyboard),
-            reply_to_message_id=reply_to.message_id if reply_to else None,
-        )
+        if (media is None or not media.is_img) and show_caption_above_media:
+            ValueError("Нельзя устанавливать show_caption_above_media при отсутствии изображения")
+        if media and media.is_img:
+            message = self.bot.send_photo(
+                peer_id,
+                photo=self.__input_file(media),
+                caption=text,
+                reply_markup=self.__markup(keyboard),
+                show_caption_above_media=show_caption_above_media,
+            )
+        elif media:
+            message = self.bot.send_document(
+                peer_id,
+                document=self.__input_file(media),
+                caption=text,
+                reply_markup=self.__markup(keyboard),
+            )
+        else:
+            message = self.bot.send_message(
+                peer_id,
+                text,
+                reply_markup=self.__markup(keyboard),
+                reply_to_message_id=reply_to.message_id if reply_to else None,
+            )
         return self.ref_for(message)
     
-    def send_texts(
+    def send_many(
         self,
         peer_ids: list[int],
         text: str,
         *,
-        keyboard: Keyboard | RemoveKeyboard | None = None
+        media: Media | None = None,
+        keyboard: Keyboard | RemoveKeyboard | None = None,
+        show_caption_above_media: bool = False
     ) -> None:
         error_list: list[Exception] = []
         for peer_id in peer_ids:
             try:
-                self.send_text(peer_id, text, keyboard=keyboard)
+                self.send(
+                    peer_id, text, media=media, keyboard=keyboard, 
+                    show_caption_above_media=show_caption_above_media
+                )
             except Exception as exc:
                 error_list.append(exc)
         multierror = MultiError(error_list, "при рассылке сообщений")
         multierror.clean_raise()
-
-    def send_photo(
-        self,
-        peer_id: int,
-        media: Media,
-        *,
-        caption: str = "",
-        keyboard: Keyboard | RemoveKeyboard | None = None,
-        show_caption_above_media: bool = False,
-    ) -> MessageRef:
-        message = self.bot.send_photo(
-            peer_id,
-            photo=self.__input_file(media),
-            caption=caption,
-            reply_markup=self.__markup(keyboard),
-            show_caption_above_media=show_caption_above_media,
-        )
-        return self.ref_for(message)
-
-    def send_document(
-        self,
-        peer_id: int,
-        media: Media,
-        *,
-        caption: str = "",
-        keyboard: Keyboard | RemoveKeyboard | None = None,
-    ) -> MessageRef:
-        message = self.bot.send_document(
-            peer_id,
-            document=self.__input_file(media),
-            caption=caption,
-            reply_markup=self.__markup(keyboard),
-        )
-        return self.ref_for(message)
 
     def edit_text(
         self,

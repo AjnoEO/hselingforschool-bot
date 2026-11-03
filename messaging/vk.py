@@ -108,7 +108,30 @@ class VkMessenger(Messenger):
             return file.name, file.name
         raise ValueError("У медиа нет ни пути, ни данных")
 
-    def __send(self, peer_id: int | list[int], text: str, *, attachment: str | None = None,
+    # def __upload_photo(self, path: str, peer_id: int) -> dict:
+    #     # VkUpload.photo_messages sends the file as "file0", but VK's messages
+    #     # photo upload server expects the field "photo".
+    #     url = self.api.photos.getMessagesUploadServer(peer_id=peer_id)["upload_url"]
+    #     with open(path, "rb") as photo:
+    #         response = requests.post(
+    #             url,
+    #             files={"photo": (os.path.basename(path), photo)},
+    #             timeout=30,
+    #         )
+    #     try:
+    #         data = response.json()
+    #     except ValueError as error:
+    #         # TODO: повторять загрузку и разбирать v2/bulk_upload
+    #         raise RuntimeError(f"VK photo upload failed: HTTP {response.status_code}") from error
+    #     if data.get("error"):
+    #         raise RuntimeError(f"VK photo upload failed: {data['error']}")
+    #     return self.api.photos.saveMessagesPhoto(
+    #         server=data["server"],
+    #         photo=data["photo"],
+    #         hash=data["hash"],
+    #     )[0]
+
+    def __send(self, peer_id: int | list[int], text: str, *, media: Media | None = None,
                keyboard: Keyboard | RemoveKeyboard | None = None,
                reply_to: MessageRef | None = None) -> MessageRef:
         params = {
@@ -116,7 +139,21 @@ class VkMessenger(Messenger):
             "message": html_to_vk(text),
             "random_id": secrets.randbelow(2 ** 31),
         }
-        if attachment:
+        if media:
+            path, temporary = self.__path(media)
+            try:
+                if media.is_img:
+                    attachment_type = "photo"
+                    # uploaded = self.__upload_photo(path, peer_id)
+                    uploaded = self.upload.photo_messages(path, peer_id)[0]
+                else:
+                    attachment_type = "doc"
+                    # uploaded = self.upload.document(path, title=media.filename, message_peer_id=peer_id)["doc"]
+                    uploaded = self.upload.document_message(path, title=media.filename, peer_id=peer_id)["doc"]
+            finally:
+                if temporary:
+                    os.unlink(temporary)
+            attachment = f"{attachment_type}{uploaded['owner_id']}_{uploaded['id']}"
             params["attachment"] = attachment
         keyboard_json = vk_keyboard(keyboard)
         if keyboard_json is not None:
@@ -141,73 +178,47 @@ class VkMessenger(Messenger):
         self.__texts[(peer_id, api_response)] = text
         return MessageRef(peer_id, api_response, Platform.VK)
 
-    def send_text(
+    def send(
         self,
         peer_id: int,
         text: str,
         *,
+        media: Media | None = None,
         keyboard: Keyboard | RemoveKeyboard | None = None,
-        reply_to: MessageRef | None = None
+        reply_to: MessageRef | None = None,
+        show_caption_above_media: bool = False
     ) -> MessageRef:
-        return self.__send(peer_id, text, keyboard=keyboard, reply_to=reply_to)
+        return self.__send(peer_id, text, media=media, keyboard=keyboard, reply_to=reply_to)
     
-    def send_texts(
+    def send_many(
         self,
         peer_ids: list[int],
         text: str,
         *,
-        keyboard: Keyboard | RemoveKeyboard | None = None
+        media: Media | None = None,
+        keyboard: Keyboard | RemoveKeyboard | None = None,
+        show_caption_above_media: bool = False
     ) -> None:
-        self.__send(peer_ids, text, keyboard=keyboard)
+        self.__send(peer_ids, text, media=media, keyboard=keyboard)
 
-    def __upload_photo(self, path: str, peer_id: int) -> dict:
-        # VkUpload.photo_messages sends the file as "file0", but VK's messages
-        # photo upload server expects the field "photo".
-        url = self.api.photos.getMessagesUploadServer(peer_id=peer_id)["upload_url"]
-        with open(path, "rb") as photo:
-            response = requests.post(
-                url,
-                files={"photo": (os.path.basename(path), photo)},
-                timeout=30,
-            )
-        try:
-            data = response.json()
-        except ValueError as error:
-            # TODO: повторять загрузку и разбирать v2/bulk_upload
-            raise RuntimeError(f"VK photo upload failed: HTTP {response.status_code}") from error
-        if data.get("error"):
-            raise RuntimeError(f"VK photo upload failed: {data['error']}")
-        return self.api.photos.saveMessagesPhoto(
-            server=data["server"],
-            photo=data["photo"],
-            hash=data["hash"],
-        )[0]
+    # def send_photo(self, peer_id, media, *, caption="", keyboard=None,
+    #                show_caption_above_media=False) -> MessageRef:
+    #     try:
+    #         path, temporary = self.__path(media)
+    #         try:
+    #             uploaded = self.__upload_photo(path, peer_id)
+    #         finally:
+    #             if temporary:
+    #                 os.unlink(temporary)
+    #     except Exception as error:
+    #         # TODO: пробрасывать ошибку после того, как починим загрузку VK
+    #         print(f"! Не удалось отправить фото в VK: {error}")
+    #         return self.send_text(peer_id, caption or "Не удалось отправить изображение", keyboard=keyboard)
+    #     attachment = f"photo{uploaded['owner_id']}_{uploaded['id']}"
+    #     return self.__send(peer_id, caption, attachment=attachment, keyboard=keyboard)
 
-    def send_photo(self, peer_id, media, *, caption="", keyboard=None,
-                   show_caption_above_media=False) -> MessageRef:
-        try:
-            path, temporary = self.__path(media)
-            try:
-                uploaded = self.__upload_photo(path, peer_id)
-            finally:
-                if temporary:
-                    os.unlink(temporary)
-        except Exception as error:
-            # TODO: пробрасывать ошибку после того, как починим загрузку VK
-            print(f"! Не удалось отправить фото в VK: {error}")
-            return self.send_text(peer_id, caption or "Не удалось отправить изображение", keyboard=keyboard)
-        attachment = f"photo{uploaded['owner_id']}_{uploaded['id']}"
-        return self.__send(peer_id, caption, attachment=attachment, keyboard=keyboard)
-
-    def send_document(self, peer_id, media, *, caption="", keyboard=None) -> MessageRef:
-        path, temporary = self.__path(media)
-        try:
-            uploaded = self.upload.document(path, title=media.filename, message_peer_id=peer_id)["doc"]
-        finally:
-            if temporary:
-                os.unlink(temporary)
-        attachment = f"doc{uploaded['owner_id']}_{uploaded['id']}"
-        return self.__send(peer_id, caption, attachment=attachment, keyboard=keyboard)
+    # def send_document(self, peer_id, media, *, caption="", keyboard=None) -> MessageRef:
+    #     pass
 
     def edit_text(self, ref, text, *, keyboard=None) -> None:
         params = {

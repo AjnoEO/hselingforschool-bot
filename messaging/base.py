@@ -10,44 +10,27 @@ class Messenger:
     def ref_for(self, message) -> MessageRef:
         raise NotImplementedError
 
-    def send_text(
+    def send(
         self,
         peer_id: int,
-        text: str,
+        text: str = None,
         *,
+        media: Media | None = None,
         keyboard: Keyboard | RemoveKeyboard | None = None,
         reply_to: MessageRef | None = None,
+        show_caption_above_media: bool = False
     ) -> MessageRef:
         raise NotImplementedError
 
-    def send_texts(
+    def send_many(
         self,
         peer_ids: list[int],
-        text: str,
+        text: str = None,
         *,
+        media: Media | None = None,
         keyboard: Keyboard | RemoveKeyboard | None = None,
+        show_caption_above_media: bool = False
     ) -> None:
-        raise NotImplementedError
-
-    def send_photo(
-        self,
-        peer_id: int,
-        media: Media,
-        *,
-        caption: str = "",
-        keyboard: Keyboard | RemoveKeyboard | None = None,
-        show_caption_above_media: bool = False,
-    ) -> MessageRef:
-        raise NotImplementedError
-
-    def send_document(
-        self,
-        peer_id: int,
-        media: Media,
-        *,
-        caption: str = "",
-        keyboard: Keyboard | RemoveKeyboard | None = None,
-    ) -> MessageRef:
         raise NotImplementedError
 
     def edit_text(

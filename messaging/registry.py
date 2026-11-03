@@ -27,23 +27,36 @@ class MessengerRegistry:
         if user.external_id is None:
             raise ValueError(f"Пользователь {user} не авторизован")
 
-    def send_text(
+    def send(
         self,
         platform: Platform,
         peer_id: int,
-        text: str,
+        text: str = None,
         *,
+        media: Media = None,
         keyboard: Keyboard | RemoveKeyboard | None = None,
         reply_to: MessageRef | None = None,
+        show_caption_above_media: bool = False,
     ) -> MessageRef:
-        return self.for_platform(platform).send_text(
-            peer_id, text, keyboard=keyboard, reply_to=reply_to
+        return self.for_platform(platform).send(
+            peer_id, text, media=media, keyboard=keyboard,
+            reply_to=reply_to, show_caption_above_media=show_caption_above_media
         )
 
-    def notify(self, user, text: str, *, keyboard: Keyboard | RemoveKeyboard | None = None) -> MessageRef:
+    def notify(
+        self,
+        user,
+        text: str = None,
+        *,
+        media: Media = None,
+        keyboard: Keyboard | RemoveKeyboard | None = None,
+        reply_to: MessageRef | None = None,
+        show_caption_above_media: bool = False
+    ) -> MessageRef:
         self.__check_user(user)
-        return self.for_platform(user.platform).send_text(
-            user.external_id, text, keyboard=keyboard
+        return self.for_platform(user.platform).send(
+            user.external_id, text, media=media, keyboard=keyboard,
+            reply_to=reply_to, show_caption_above_media=show_caption_above_media
         )
     
     def notify_many(
@@ -51,7 +64,9 @@ class MessengerRegistry:
         users,
         text: str | Callable[[Platform], str] | Callable[[Any], str],
         *,
+        media: Media = None,
         keyboard: Keyboard | RemoveKeyboard | None | Callable[[Any], Keyboard | RemoveKeyboard | None] = None,
+        show_caption_above_media: bool = False,
         only_registered: bool = True   
     ) -> None:
         unique_text_per_user = False
@@ -80,7 +95,10 @@ class MessengerRegistry:
                     if not only_registered: error_list.append(exc)
                     continue
                 try:
-                    self.notify(user, user_text(user), keyboard=user_kb(user))
+                    self.notify(
+                        user, user_text(user), media=media, keyboard=user_kb(user),
+                        show_caption_above_media=show_caption_above_media
+                    )
                 except Exception as exc:
                     error_list.append(exc)
         else:
@@ -93,78 +111,11 @@ class MessengerRegistry:
                     if not only_registered: error_list.append(exc)
             for platform, user_ids in platform_to_user_ids.items():
                 try:
-                    self.for_platform(platform).send_texts(user_ids, text, keyboard=keyboard)
+                    self.for_platform(platform).send_many(user_ids, text, keyboard=keyboard)
                 except MultiError as new_multierror:
                     error_list.extend(new_multierror.error_list)
         multierror = MultiError(error_list, "при рассылке сообщений")
         multierror.clean_raise()
-
-    def send_photo(
-        self,
-        platform: Platform,
-        peer_id: int,
-        media: Media,
-        *,
-        caption: str = "",
-        keyboard: Keyboard | RemoveKeyboard | None = None,
-        show_caption_above_media: bool = False,
-    ) -> MessageRef:
-        return self.for_platform(platform).send_photo(
-            peer_id,
-            media,
-            caption=caption,
-            keyboard=keyboard,
-            show_caption_above_media=show_caption_above_media,
-        )
-
-    def notify_photo(
-        self,
-        user,
-        media: Media,
-        *,
-        caption: str = "",
-        keyboard: Keyboard | RemoveKeyboard | None = None,
-        show_caption_above_media: bool = False,
-    ) -> MessageRef:
-        self.__check_user(user)
-        return self.send_photo(
-            user.platform,
-            user.external_id,
-            media,
-            caption=caption,
-            keyboard=keyboard,
-            show_caption_above_media=show_caption_above_media,
-        )
-
-    def send_document(
-        self,
-        platform: Platform,
-        peer_id: int,
-        media: Media,
-        *,
-        caption: str = "",
-        keyboard: Keyboard | RemoveKeyboard | None = None,
-    ) -> MessageRef:
-        return self.for_platform(platform).send_document(
-            peer_id, media, caption=caption, keyboard=keyboard
-        )
-
-    def notify_document(
-        self,
-        user,
-        media: Media,
-        *,
-        caption: str = "",
-        keyboard: Keyboard | RemoveKeyboard | None = None,
-    ) -> MessageRef:
-        self.__check_user(user)
-        return self.send_document(
-            user.platform,
-            user.external_id,
-            media,
-            caption=caption,
-            keyboard=keyboard,
-        )
 
     def copy_message(self, user, ref: MessageRef) -> MessageRef:
         self.__check_user(user)
