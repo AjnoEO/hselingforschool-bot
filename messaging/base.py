@@ -26,7 +26,7 @@ class Messenger:
         text: str,
         *,
         keyboard: Keyboard | RemoveKeyboard | None = None,
-    ) -> list[MessageRef]:
+    ) -> None:
         raise NotImplementedError
 
     def send_photo(

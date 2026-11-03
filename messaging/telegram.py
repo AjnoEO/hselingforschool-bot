@@ -67,12 +67,11 @@ class TelegramMessenger(Messenger):
         text: str,
         *,
         keyboard: Keyboard | RemoveKeyboard | None = None
-    ) -> list[MessageRef]:
-        messages: list[MessageRef] = []
+    ) -> None:
         error_list: list[Exception] = []
         for peer_id in peer_ids:
             try:
-                messages.append(self.send_text(peer_id, text, keyboard=keyboard))
+                self.send_text(peer_id, text, keyboard=keyboard)
             except Exception as exc:
                 error_list.append(exc)
         multierror = MultiError(error_list, "при рассылке сообщений")

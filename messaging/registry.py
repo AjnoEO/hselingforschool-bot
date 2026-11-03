@@ -1,4 +1,6 @@
-from typing import DefaultDict
+from collections import defaultdict
+from inspect import signature, Parameter
+from typing import Callable, Any
 from utils import MultiError
 from enums import Platform
 from .base import Messenger
@@ -47,24 +49,53 @@ class MessengerRegistry:
     def notify_many(
         self,
         users,
-        text: str,
+        text: str | Callable[[Platform], str] | Callable[[Any], str],
         *,
-        keyboard: Keyboard | RemoveKeyboard | None = None,
+        keyboard: Keyboard | RemoveKeyboard | None | Callable[[Any], Keyboard | RemoveKeyboard | None] = None,
         only_registered: bool = True   
-    ) -> list[MessageRef]:
-        platform_to_user_ids: DefaultDict[Platform, list] = DefaultDict(lambda: [])
+    ) -> None:
+        unique_text_per_user = False
+        if isinstance(text, Callable):
+            argclass = list(signature(text).parameters.values())[0].annotation
+            if isinstance(Parameter.empty(), argclass):
+                raise ValueError("Тип аргумента функции text должен быть задан в сигнатуре функции")
+            unique_text_per_user = not issubclass(argclass, Platform)
+        unique_keyboard_per_user = isinstance(keyboard, Callable)
         error_list: list[Exception] = []
-        for user in users:
-            try:
-                self.__check_user(user)
-                platform_to_user_ids[user.platform].append(user.external_id)
-            except ValueError as exc:
-                if not only_registered: error_list.append(exc)
-        for platform, user_ids in platform_to_user_ids.items():
-            try:
-                self.for_platform(platform).send_texts(user_ids, text, keyboard=keyboard)
-            except MultiError as new_multierror:
-                error_list.extend(new_multierror.error_list)
+        if unique_text_per_user or unique_keyboard_per_user:
+            if unique_text_per_user:
+                user_text = text
+            elif isinstance(text, Callable):
+                user_text = lambda user: text(user.platform)
+            else:
+                user_text = lambda _: text
+            if unique_keyboard_per_user:
+                user_kb = keyboard
+            else:
+                user_kb = lambda _: keyboard
+            for user in users:
+                try:
+                    self.__check_user(user)
+                except ValueError as exc:
+                    if not only_registered: error_list.append(exc)
+                    continue
+                try:
+                    self.notify(user, user_text(user), keyboard=user_kb(user))
+                except Exception as exc:
+                    error_list.append(exc)
+        else:
+            platform_to_user_ids: defaultdict[Platform, list] = defaultdict(lambda: [])
+            for user in users:
+                try:
+                    self.__check_user(user)
+                    platform_to_user_ids[user.platform].append(user.external_id)
+                except ValueError as exc:
+                    if not only_registered: error_list.append(exc)
+            for platform, user_ids in platform_to_user_ids.items():
+                try:
+                    self.for_platform(platform).send_texts(user_ids, text, keyboard=keyboard)
+                except MultiError as new_multierror:
+                    error_list.extend(new_multierror.error_list)
         multierror = MultiError(error_list, "при рассылке сообщений")
         multierror.clean_raise()
 

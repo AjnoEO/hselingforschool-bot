@@ -402,16 +402,14 @@ def olymp_reg_start(ctx: Context):
     current_olymp.status = OlympStatus.REGISTRATION
     participants = current_olymp.get_participants()
     examiners = current_olymp.get_examiners()
-    for p in participants:
-        if p.external_id:
-            p_message = (f"Мы запустили авторизацию в боте для онлайн-участников. Тебя авторизовали автоматически!\n"
-                         f"{p.display_data()}")
-            notifier.notify(p, p_message)
-    for e in examiners:
-        if e.external_id:
-            e_message = (f"Мы запустили авторизацию в боте. Тебя автоматически авторизовали как принимающего!\n"
-                         f"{e.display_data()}")
-            notifier.notify(e, e_message)
+    def p_message(p: Participant):
+        return (f"Мы запустили авторизацию в боте для онлайн-участников. Тебя авторизовали автоматически!\n"
+                f"{p.display_data()}")
+    notifier.notify_many(participants, p_message)
+    def e_message(e: Examiner):
+        return (f"Мы запустили авторизацию в боте. Тебя автоматически авторизовали как принимающего!\n"
+                f"{e.display_data()}")
+    notifier.notify_many(examiners, e_message)
     ctx.reply(f"Регистрация на олимпиаду <em>{current_olymp.name}</em> запущена")
 
 
@@ -584,19 +582,17 @@ def olymp_finish(ctx: Context):
                               "Можешь отправляться на заслуженный отдых")
     p_in_queue_message = ("Олимпиада завершилась! Больше записываться в очередь нельзя, "
                           "но тех, кто уже записался, мы проверим, так что не уходи")
+    def p_message(p: Participant):
+        return p_in_queue_message if p.queue_entry is not None else p_not_in_queue_message
+    def p_keyboard(p: Participant):
+        return None if p.queue_entry is not None else participant_keyboard_olymp_finished
     error_list: list[Exception] = []
     for p in participants:
         p.finished = True
-        if p.external_id:
-            try:
-                is_in_queue = p.queue_entry is not None
-                notifier.notify(
-                    p,
-                    p_in_queue_message if is_in_queue else p_not_in_queue_message,
-                    keyboard = None if is_in_queue else participant_keyboard_olymp_finished
-                )
-            except Exception as exc:
-                error_list.append(exc)
+    try:
+        notifier.notify_many(participants, p_message, keyboard=p_keyboard)
+    except MultiError as exc:
+        error_list.extend(exc.error_list)
     if current_olymp.unhandled_queue_left(finished=True):
         participants_left = current_olymp.participants_amount(finished=False)
         if participants_left == 0:

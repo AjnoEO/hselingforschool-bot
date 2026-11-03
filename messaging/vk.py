@@ -157,8 +157,8 @@ class VkMessenger(Messenger):
         text: str,
         *,
         keyboard: Keyboard | RemoveKeyboard | None = None
-    ) -> list[MessageRef]:
-        return self.__send(peer_ids, text, keyboard=keyboard)
+    ) -> None:
+        self.__send(peer_ids, text, keyboard=keyboard)
 
     def __upload_photo(self, path: str, peer_id: int) -> dict:
         # VkUpload.photo_messages sends the file as "file0", but VK's messages
