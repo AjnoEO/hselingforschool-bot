@@ -152,6 +152,7 @@ class VkMessenger(Messenger):
                 self.__texts[(message_obj["peer_id"], message_obj["message_id"])] = text
             multierror = MultiError(error_list, "при рассылке сообщений")
             multierror.clean_raise()
+            return
         self.__texts[(peer_id, api_response)] = text
         return MessageRef(peer_id, api_response, Platform.VK)
 
@@ -244,7 +245,7 @@ class VkMessenger(Messenger):
         if self.platform != ref.platform and isinstance(ref.media, Document):
             raise NotImplementedError(f"Пересылка документов из {ref.platform} в {self.platform} пока невозможна")
         if self.platform != ref.platform:
-            self.send_many(peer_ids, ref.text, media=ref.media)
+            return self.send_many(peer_ids, ref.text, media=ref.media)
         return self.__send(peer_id=peer_ids, forward_message=ref)
 
     def download_document(self, document: Document) -> bytes:

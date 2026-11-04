@@ -2059,40 +2059,43 @@ def announce_command(ctx: Context):
     send_to_participants = (command != 'announce_to_examiners')
     send_to_examiners = (command != 'announce_to_participants')
     owner_response = ""
+    participants = []
     p_amount = 0
+    examiners = []
     e_amount = 0
-    err_amount = 0
-    send_error = None
+    error_list = []
     if send_to_participants:
-        for p in current_olymp.get_participants(include_tags=include_tags, exclude_tags=exclude_tags):
-            if p.external_id:
-                try:
-                    ctx.copy_to(p, announcement)
-                    p_amount += 1
-                except Exception as exc:
-                    err_amount += 1
-                    send_error = exc
+        participants = current_olymp.get_participants(include_tags=include_tags, exclude_tags=exclude_tags)
+        try:
+            p_amount = len(participants)
+            notifier.copy_many(participants, announcement)
+        except MultiError as exc:
+            p_amount -= len(exc)
+            error_list.extend(exc.error_list)
         owner_response += f"{p_amount} {decline(p_amount, 'участник', ('', 'а', 'ов'))}"
     if send_to_participants and send_to_examiners:
         owner_response += " и "
     if send_to_examiners:
-        for e in current_olymp.get_examiners(include_tags=include_tags, exclude_tags=exclude_tags):
-            if e.external_id:
-                try:
-                    ctx.copy_to(e, announcement)
-                    e_amount += 1
-                except Exception as exc:
-                    err_amount += 1
-                    send_error = exc
+        examiners = current_olymp.get_examiners(include_tags=include_tags, exclude_tags=exclude_tags)
+        try:
+            e_amount = len(examiners)
+            notifier.copy_many(examiners, announcement)
+        except MultiError as exc:
+            e_amount -= len(exc)
+            error_list.extend(exc.error_list)
         owner_response += f"{e_amount} {decline(e_amount, 'принимающ', ('ий', 'их', 'их'))}"
-    owner_response += " получил" + ("и" if p_amount + e_amount > 1 else "") + " оповещение!"
-    if err_amount:
+    owner_response += " получил" + ("и" if p_amount + e_amount != 1 else "") + " оповещение!"
+    if len(error_list):
         owner_response += (
-            f"\n⚠️ Не удалось доставить сообщение {err_amount} {decline(err_amount, 'пользовател', ('ю', 'ям', 'ям'))}"
+            f"\n⚠️ Не удалось доставить сообщение "
+            f"{len(error_list)} {decline(len(error_list), 'пользовател', ('ю', 'ям', 'ям'))}"
         )
     ctx.send(ctx.peer_id, owner_response, reply_to=announcement)
-    if err_amount and (err_amount > (p_amount + e_amount) / 2):
-        raise send_error
+    send_error = MultiError(error_list, "при рассылке сообщений")
+    if len(send_error) * 3 > len(participants) + len(examiners):
+        send_error.clean_raise()
+    elif send_error:
+        raise UserError(*send_error.args, ignore=True) from error_list[0]
 
 
 @router.message(

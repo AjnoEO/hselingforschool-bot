@@ -43,8 +43,6 @@ class MultiError(Exception):
     def clean_raise(self):
         if not self:
             return
-        if len(self) == 1:
-            raise self.error_list[0]
         raise self from self.error_list[0]
 
 
