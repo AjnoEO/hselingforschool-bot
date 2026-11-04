@@ -4,10 +4,13 @@ from enums import Platform
 class MessageRef:
     """Ссылка на сообщение, не зависящая от мессенджера"""
 
-    def __init__(self, peer_id: int, message_id: int, platform: Platform = Platform.TELEGRAM):
+    def __init__(self, peer_id: int, message_id: int, platform: Platform,
+                 text: str | None = None, media: Document | Media | None = None):
         self.peer_id: int = peer_id
         self.message_id: int = message_id
         self.platform: Platform = platform
+        self.text = text
+        self.media = media
 
 
 class Button:
@@ -41,12 +44,25 @@ class Media:
         self,
         path: str | None = None,
         *,
+        is_img: bool = True,
         data: bytes | None = None,
         filename: str | None = None,
     ):
         self.path: str | None = path
+        self.is_img: bool = is_img
         self.data: bytes | None = data # TODO: Точно надо?
         self.filename: str | None = filename
+
+
+class FileMedia(Media):
+    def __init__(
+            self,
+            path: str | None = None,
+            *,
+            data: bytes | None = None,
+            filename = None
+    ):
+        super().__init__(path, is_img=False, data=data, filename=filename)
 
 
 class Document:

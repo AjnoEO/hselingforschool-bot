@@ -1,4 +1,4 @@
-from enums import OlympStatus, QueueStatus
+from enums import OlympStatus, QueueStatus, Platform
 from sqlite3 import Cursor
 from db import db_connection
 from tag import Tag
@@ -135,7 +135,8 @@ class Olymp:
     def __tag_condition(
         self, table: str,
         include_tags: list[Tag] | list[int] | list[str] | None = None,
-        exclude_tags: list[Tag] | list[int] | list[str] | None = None
+        exclude_tags: list[Tag] | list[int] | list[str] | None = None,
+        user_data: bool = False
     ) -> tuple[str, list]:
         """
         :return: `query`, `params`
@@ -177,6 +178,7 @@ class Olymp:
             params.extend(exclude_tags)
         q = "WITH " + ", ".join(with_clauses) + "\n" if with_clauses else ""
         q += f"SELECT user_id FROM {table} "
+        if user_data: q += "LEFT JOIN users USING (user_id) "
         if include_tags: q += "LEFT JOIN user_lacking_required_tags l USING (user_id) "
         if exclude_tags: q += "LEFT JOIN user_excluded_tags e USING (user_id) "
         q += "WHERE olymp_id = ?"
@@ -189,14 +191,28 @@ class Olymp:
     @provide_cursor
     def get_participants(
         self, start: int | None = None, limit: int | None = None, *, 
-        sort: bool = False, finished: bool | None = None, 
+        sort: bool = False,
+        platform: Platform | str | int | None = None,
+        last_block_number: int | None = None,
+        junior: bool | None = None,
+        finished: bool | None = None,
         include_tags: list[Tag] | list[int] | list[str] | None = None,
         exclude_tags: list[Tag] | list[int] | list[str] | None = None,
         cursor: Cursor | None = None
     ) -> list[Participant]:
         if not limit and start:
             raise ValueError("Нельзя устанавливать начало списка участников, не устанавливая ограничение на количество")
-        q, params = self.__tag_condition("participants", include_tags, exclude_tags)
+        q, params = self.__tag_condition("participants", include_tags, exclude_tags, user_data=(platform is not None))
+        if platform is not None:
+            if isinstance(platform, str): platform = Platform[platform]
+            if isinstance(platform, int): platform = Platform(platform)
+            q += f" AND platform = ?"
+            params.append(platform)
+        if last_block_number is not None:
+            q += f" AND last_block_number = ?"
+            params.append(last_block_number)
+        if junior is not None:
+            q += f" AND grade {'<' if junior else '>='} 10"
         if finished is not None:
             q += f" AND finished = ?"
             params.append(finished)
@@ -212,23 +228,51 @@ class Olymp:
         results = cursor.fetchall()
         return [Participant.from_user_id(user_id_tuple[0], self.id) for user_id_tuple in results]
     
-    def participants_amount(self, finished: bool | None = None) -> int:
-        if finished is None:
-            return self.__amount("participants")
-        else:
-            return self.__amount("participants", ["finished = ?"], [finished])
+    def participants_amount(
+        self,
+        platform: Platform | str | int | None = None,
+        last_block_number: int | None = None,
+        junior: bool | None = None,
+        finished: bool | None = None
+    ) -> int:
+        conditions = []
+        params = []
+        if platform is not None:
+            if isinstance(platform, str):
+                platform = Platform[platform]
+            if isinstance(platform, Platform):
+                platform = platform.value
+            conditions.append("platform = ?")
+            params.append(platform)
+        if last_block_number is not None:
+            conditions.append("last_block_number = ?")
+            params.append(last_block_number)
+        if junior is not None:
+            conditions.append(f"grade {'<' if junior else '>='} 10")
+        if finished is not None:
+            conditions.append("finished = ?")
+            params.append(finished)
+        return self.__amount("participants", conditions, params)
     
     @provide_cursor
     def get_examiners(
         self, start: int | None = None, limit: int | None = None, *,
-        sort: bool = False, only_free: bool = False, order_by_busyness: bool = False, 
+        sort: bool = False,
+        platform: Platform | str | int | None = None,
+        only_free: bool = False,
+        order_by_busyness: bool = False,
         include_tags: list[Tag] | list[int] | list[str] | None = None,
         exclude_tags: list[Tag] | list[int] | list[str] | None = None,
         cursor: Cursor | None = None
     ) -> list[Examiner]:
         if not limit and start:
             raise ValueError("Нельзя устанавливать начало списка принимающих, не устанавливая ограничение на количество")
-        q, params = self.__tag_condition("examiners", include_tags, exclude_tags)
+        q, params = self.__tag_condition("examiners", include_tags, exclude_tags, user_data=(platform is not None))
+        if platform is not None:
+            if isinstance(platform, str): platform = Platform[platform]
+            if isinstance(platform, int): platform = Platform(platform)
+            q += f" AND platform = ?"
+            params.append(platform)
         if only_free:
             q += " AND is_busy = 0"
         if order_by_busyness:

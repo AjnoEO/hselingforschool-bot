@@ -11,7 +11,7 @@ def make_message(**overrides):
         "message_id": 20,
         "from_user": SimpleNamespace(id=30, username="user"),
         "text": "/start",
-        "caption": None,
+        "photo": None,
         "document": None,
         "reply_to_message": None,
     }
@@ -27,23 +27,25 @@ class TelegramTransportTest(unittest.TestCase):
         self.assertEqual(event.sender_id, 30)
         self.assertEqual(event.sender_handle, "user")
         self.assertEqual(event.text, "/start")
-        self.assertEqual(event.content_type, "text")
+        self.assertIsNone(event.attachment)
         self.assertIsNone(event.document)
 
     def test_document_event(self):
         document = SimpleNamespace(file_id="file-1", file_name="table.xlsx", mime_type="application/vnd.ms-excel")
         event = TelegramTransport.to_message_event(make_message(
-            text=None,
-            caption="/upload_participants",
+            text="/upload_participants",
             document=document,
         ))
-        self.assertEqual(event.content_type, "document")
-        self.assertEqual(event.caption, "/upload_participants")
+        self.assertEqual(event.text, "/upload_participants")
         self.assertEqual(event.document.file_id, "file-1")
         self.assertEqual(event.document.file_name, "table.xlsx")
+        self.assertEqual(event.document.mime_type, "application/vnd.ms-excel")
+        self.assertEqual(event.attachment.file_id, "file-1")
+        self.assertEqual(event.attachment.file_name, "table.xlsx")
+        self.assertEqual(event.attachment.mime_type, "application/vnd.ms-excel")
 
     def test_reply_to(self):
-        reply = SimpleNamespace(chat=SimpleNamespace(id=10), message_id=5, document=None)
+        reply = SimpleNamespace(chat=SimpleNamespace(id=10), message_id=5, text="x", photo=None, document=None)
         event = TelegramTransport.to_message_event(make_message(reply_to_message=reply))
         self.assertEqual(event.reply_to.peer_id, 10)
         self.assertEqual(event.reply_to.message_id, 5)
@@ -53,15 +55,18 @@ class TelegramTransportTest(unittest.TestCase):
         reply = SimpleNamespace(
             chat=SimpleNamespace(id=10),
             message_id=5,
+            text=None,
+            caption=None,
             document=reply_document,
         )
         event = TelegramTransport.to_message_event(make_message(
             text="/problem_block_update_file",
             reply_to_message=reply,
         ))
-        self.assertEqual(event.content_type, "text")
         self.assertEqual(event.document.file_id, "file-2")
         self.assertEqual(event.document.file_name, "block.pdf")
+        self.assertEqual(event.document.mime_type, "application/pdf")
+        self.assertIsNone(event.attachment)
 
     def test_callback_event(self):
         callback_query = SimpleNamespace(

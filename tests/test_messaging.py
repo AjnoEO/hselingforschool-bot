@@ -17,6 +17,7 @@ from messaging import (
     IncomingMessage,
     Keyboard,
     Media,
+    FileMedia,
     MessageRef,
     MessengerRegistry,
     REMOVE_KEYBOARD,
@@ -83,7 +84,7 @@ class TelegramMessengerTest(unittest.TestCase):
 
     def test_send_text_inline_keyboard(self):
         keyboard = inline_keyboard({'Да': 'yes', 'Нет': 'no'}, row_width=2)
-        ref = self.messenger.send_text(10, "Вопрос", keyboard=keyboard)
+        ref = self.messenger.send(10, "Вопрос", keyboard=keyboard)
         self.assertEqual(ref.peer_id, 10)
         call = self.bot.calls[-1]
         self.assertEqual(call[0], "send_message")
@@ -98,37 +99,35 @@ class TelegramMessengerTest(unittest.TestCase):
     def test_send_text_reply_keyboard_and_remove(self):
         keyboard = Keyboard()
         keyboard.row(Button("Сдать"), Button("Мои задачи"))
-        self.messenger.send_text(10, "Кнопки", keyboard=keyboard)
+        self.messenger.send(10, "Кнопки", keyboard=keyboard)
         markup = self.bot.calls[-1][3]["reply_markup"]
         self.assertIsInstance(markup, ReplyKeyboardMarkup)
         buttons = markup.keyboard[0]
         self.assertEqual(buttons[0]["text"], "Сдать")
 
-        self.messenger.send_text(10, "Без кнопок", keyboard=REMOVE_KEYBOARD)
+        self.messenger.send(10, "Без кнопок", keyboard=REMOVE_KEYBOARD)
         self.assertIsInstance(self.bot.calls[-1][3]["reply_markup"], ReplyKeyboardRemove)
 
     def test_send_photo_and_document(self):
         photo_path = os.path.join(REPO_DIR, "predefined_files", "buttons.png")
         document_path = os.path.join(REPO_DIR, "predefined_files", "default_problem_block.pdf")
-        photo_ref = self.messenger.send_photo(
-            10,
-            Media(photo_path, filename="Где_кнопки.png"),
-            caption="Кнопки",
+        photo_ref = self.messenger.send(
+            10, "Кнопки",
+            media=Media(photo_path, filename="Где_кнопки.png"),
             show_caption_above_media=True,
         )
         self.assertEqual(photo_ref.peer_id, 10)
         self.assertIsInstance(self.bot.calls[-1][2]["photo"], InputFile)
         self.assertTrue(self.bot.calls[-1][2]["show_caption_above_media"])
 
-        self.messenger.send_document(
-            10,
-            Media(document_path, filename="Блок_1.pdf"),
-            caption="Блок",
+        self.messenger.send(
+            10, "Блок",
+            media=FileMedia(document_path, filename="Блок_1.pdf"),
         )
         self.assertIsInstance(self.bot.calls[-1][2]["document"], InputFile)
 
     def test_edit_delete_answer_and_copy(self):
-        ref = MessageRef(10, 20)
+        ref = MessageRef(10, 20, Platform.TELEGRAM)
         self.messenger.edit_text(ref, "Новый текст", keyboard=None)
         self.assertEqual(self.bot.calls[-1][0], "edit_message_text")
         self.assertEqual(self.bot.calls[-1][1:4], (10, 20, "Новый текст"))

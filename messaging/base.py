@@ -10,35 +10,30 @@ class Messenger:
     def ref_for(self, message) -> MessageRef:
         raise NotImplementedError
 
-    def send_text(
+    def get_contents(self, message: MessageRef) -> dict[str, str]:
+        raise NotImplementedError
+
+    def send(
         self,
         peer_id: int,
-        text: str,
+        text: str = None,
         *,
+        media: Media | None = None,
         keyboard: Keyboard | RemoveKeyboard | None = None,
         reply_to: MessageRef | None = None,
+        show_caption_above_media: bool = False
     ) -> MessageRef:
         raise NotImplementedError
 
-    def send_photo(
+    def send_many(
         self,
-        peer_id: int,
-        media: Media,
+        peer_ids: list[int],
+        text: str = None,
         *,
-        caption: str = "",
+        media: Media | None = None,
         keyboard: Keyboard | RemoveKeyboard | None = None,
-        show_caption_above_media: bool = False,
-    ) -> MessageRef:
-        raise NotImplementedError
-
-    def send_document(
-        self,
-        peer_id: int,
-        media: Media,
-        *,
-        caption: str = "",
-        keyboard: Keyboard | RemoveKeyboard | None = None,
-    ) -> MessageRef:
+        show_caption_above_media: bool = False
+    ) -> None:
         raise NotImplementedError
 
     def edit_text(
@@ -61,6 +56,17 @@ class Messenger:
         raise NotImplementedError
 
     def copy_message(self, peer_id: int, ref: MessageRef) -> MessageRef:
+        if self.platform != ref.platform and ref.text is None and ref.media is None:
+            raise ValueError(
+                f"Данные о содержании сообщения {ref} недоступны. "
+                f"Пересылка из {ref.platform} в {self.platform} невозможна")
+        raise NotImplementedError
+
+    def copy_many(self, peer_ids: list[int], ref: MessageRef) -> None:
+        if self.platform != ref.platform and ref.text is None and ref.media is None:
+            raise ValueError(
+                f"Данные о содержании сообщения {ref} недоступны. "
+                f"Пересылка из {ref.platform} в {self.platform} невозможна")
         raise NotImplementedError
 
     def download_document(self, document: Document) -> bytes:

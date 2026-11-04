@@ -39,27 +39,6 @@ class VkFormattingTest(unittest.TestCase):
 
 @unittest.skipIf(VkMessenger is None, "vk-api is not installed")
 class VkMessengerTest(unittest.TestCase):
-    def test_photo_upload_failure_falls_back_to_text(self):
-        from unittest.mock import MagicMock, patch
-
-        messenger = object.__new__(VkMessenger)
-        messenger.api = MagicMock()
-        messenger.api.photos.getMessagesUploadServer.return_value = {"upload_url": "https://upload"}
-        messenger.api.messages.send.return_value = 42
-        messenger._VkMessenger__texts = {}
-
-        response = MagicMock()
-        response.status_code = 502
-        response.json.side_effect = ValueError("empty body")
-
-        with patch("messaging.vk.requests.post", return_value=response):
-            result = messenger.send_photo(
-                123, Media("predefined_files/buttons.png"), caption="Подпись"
-            )
-
-        self.assertEqual(result.message_id, 42)
-        self.assertEqual(messenger.api.messages.send.call_args.kwargs["message"], "Подпись")
-
     def test_answer_callback_uses_event_ids(self):
         from unittest.mock import MagicMock
 
@@ -118,7 +97,6 @@ class VkTransportTest(unittest.TestCase):
         }
         event = self.SimpleNamespace(object=self.SimpleNamespace(message=message))
         result = self.transport.to_message_event(event)
-        self.assertEqual(result.content_type, "document")
         self.assertEqual(result.document.file_id, "https://example.com/a.pdf")
 
     def test_callback_event(self):

@@ -11,6 +11,8 @@ from telebot.types import (
 )
 from .base import Messenger
 from .types import Document, Keyboard, Media, MessageRef, RemoveKeyboard
+from enums import Platform
+from utils import MultiError
 
 
 class TelegramMessenger(Messenger):
@@ -18,7 +20,7 @@ class TelegramMessenger(Messenger):
         self.bot = bot
 
     def ref_for(self, message: Message) -> MessageRef:
-        return MessageRef(message.chat.id, message.message_id)
+        return MessageRef(message.chat.id, message.message_id, self.platform)
 
     def __markup(self, keyboard: Keyboard | RemoveKeyboard | None):
         if keyboard is None:
@@ -39,60 +41,77 @@ class TelegramMessenger(Messenger):
         return markup
 
     @staticmethod
-    def __input_file(media: Media) -> InputFile:
+    def __input_file(media: Document | Media) -> InputFile | str:
+        if isinstance(media, Document):
+            return media.file_id
         if media.path is not None:
             return InputFile(media.path, media.filename)
         return InputFile(media.data, media.filename)
 
-    def send_text( # TODO: Дробить длинные сообщения
+    def send( # TODO: Дробить длинные сообщения
         self,
         peer_id: int,
-        text: str,
+        text: str = None,
         *,
+        media: Document | Media | None = None,
         keyboard: Keyboard | RemoveKeyboard | None = None,
         reply_to: MessageRef | None = None,
+        show_caption_above_media: bool = False
     ) -> MessageRef:
-        message = self.bot.send_message(
-            peer_id,
-            text,
-            reply_markup=self.__markup(keyboard),
-            reply_to_message_id=reply_to.message_id if reply_to else None,
+        is_img = (
+            isinstance(media, Document) and media.mime_type == "photo"
+            or isinstance(media, Media) and media.is_img
         )
+        if (media is None or not is_img) and show_caption_above_media:
+            ValueError("Нельзя устанавливать show_caption_above_media при отсутствии изображения")
+        if is_img:
+            message = self.bot.send_photo(
+                peer_id,
+                photo=self.__input_file(media),
+                caption=text,
+                reply_markup=self.__markup(keyboard),
+                show_caption_above_media=show_caption_above_media,
+            )
+        elif media:
+            message = self.bot.send_document(
+                peer_id,
+                document=self.__input_file(media),
+                caption=text,
+                reply_markup=self.__markup(keyboard),
+            )
+        else:
+            message = self.bot.send_message(
+                peer_id,
+                text,
+                reply_markup=self.__markup(keyboard),
+                reply_to_message_id=reply_to.message_id if reply_to else None,
+            )
         return self.ref_for(message)
-
-    def send_photo(
+    
+    def send_many(
         self,
-        peer_id: int,
-        media: Media,
+        peer_ids: list[int],
+        text: str = None,
         *,
-        caption: str = "",
+        media: Document | Media | None = None,
         keyboard: Keyboard | RemoveKeyboard | None = None,
-        show_caption_above_media: bool = False,
-    ) -> MessageRef:
-        message = self.bot.send_photo(
-            peer_id,
-            photo=self.__input_file(media),
-            caption=caption,
-            reply_markup=self.__markup(keyboard),
-            show_caption_above_media=show_caption_above_media,
-        )
-        return self.ref_for(message)
-
-    def send_document(
-        self,
-        peer_id: int,
-        media: Media,
-        *,
-        caption: str = "",
-        keyboard: Keyboard | RemoveKeyboard | None = None,
-    ) -> MessageRef:
-        message = self.bot.send_document(
-            peer_id,
-            document=self.__input_file(media),
-            caption=caption,
-            reply_markup=self.__markup(keyboard),
-        )
-        return self.ref_for(message)
+        show_caption_above_media: bool = False
+    ) -> None:
+        error_list: list[Exception] = []
+        ref_to_copy: MessageRef | None = None
+        for peer_id in peer_ids:
+            try:
+                if ref_to_copy is not None:
+                    ref_to_copy = self.copy_message(peer_id, ref_to_copy)
+                else:
+                    ref_to_copy = self.send(
+                        peer_id, text, media=media, keyboard=keyboard, 
+                        show_caption_above_media=show_caption_above_media
+                    )
+            except Exception as exc:
+                error_list.append(exc)
+        multierror = MultiError(error_list, "при рассылке сообщений")
+        multierror.clean_raise()
 
     def edit_text(
         self,
@@ -123,8 +142,39 @@ class TelegramMessenger(Messenger):
         self.bot.answer_callback_query(callback_id, text=text, show_alert=show_alert)
 
     def copy_message(self, peer_id: int, ref: MessageRef) -> MessageRef:
+        if self.platform != ref.platform and ref.text is None and ref.media is None:
+            raise ValueError(
+                f"Данные о содержании сообщения {ref} недоступны. "
+                f"Пересылка из {ref.platform} в {self.platform} невозможна")
+        if self.platform != ref.platform and isinstance(ref.media, Document):
+            raise NotImplementedError(f"Пересылка документов из {ref.platform} в {self.platform} пока невозможна")
+        elif self.platform != ref.platform:
+            return self.send(peer_id, ref.text, media=ref.media)
         message = self.bot.copy_message(peer_id, ref.peer_id, ref.message_id)
-        return MessageRef(peer_id, message.message_id)
+        return MessageRef(peer_id, message.message_id, self.platform)
+
+    def copy_many(self, peer_ids: list[int], ref: MessageRef) -> None:
+        if self.platform != ref.platform and ref.text is None and ref.media is None:
+            raise ValueError(
+                f"Данные о содержании сообщения {ref} недоступны. "
+                f"Пересылка из {ref.platform} в {self.platform} невозможна")
+        if self.platform != ref.platform and isinstance(ref.media, Document):
+            raise NotImplementedError(f"Пересылка документов из {ref.platform} в {self.platform} пока невозможна")
+        same_platform = self.platform == ref.platform
+        error_list = []
+        ref_to_copy: MessageRef | None = None
+        for peer_id in peer_ids:
+            try:
+                if same_platform:
+                    self.bot.copy_message(peer_id, ref.peer_id, ref.message_id)
+                elif ref_to_copy is not None:
+                    self.bot.copy_message(peer_id, ref_to_copy.peer_id, ref_to_copy.message_id)
+                else:
+                    ref_to_copy = self.send(peer_id, ref.text, media=ref.media)
+            except Exception as exc:
+                error_list.append(exc)
+        multierror = MultiError(error_list, "при пересылке сообщения")
+        multierror.clean_raise()
 
     def download_document(self, document: Document) -> bytes:
         file = self.bot.get_file(document.file_id)

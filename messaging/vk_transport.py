@@ -34,15 +34,15 @@ class VkTransport:
         return self.__handles[user_id]
 
     @staticmethod
-    def __document_from(message):
+    def __attachment_from(message, types: list[str] = ["doc", "photo"]):
         for attachment in message.get("attachments", []):
-            if attachment.get("type") == "doc":
-                doc = attachment["doc"]
-                name = doc.get("title") or ""
-                ext = doc.get("ext")
-                if ext and not name.lower().endswith("." + ext.lower()):
+            if attachment.get("type") in types:
+                file = attachment[attachment["type"]]
+                name = file.get("title") or ""
+                ext = file.get("ext") or attachment["type"]
+                if ext and name and not name.lower().endswith("." + ext.lower()):
                     name = f"{name}.{ext}"
-                return Document(doc.get("url", ""), name, ext)
+                return Document(file.get("url", ""), name, ext)
         return None
 
     def to_message_event(self, event: VkBotEvent) -> IncomingMessage:
@@ -52,9 +52,9 @@ class VkTransport:
         message_id = int(message.get("conversation_message_id") or message["id"])
 
         reply = message.get("reply_message")
-        document = self.__document_from(message)
+        document = self.__attachment_from(message, ["doc"])
         if document is None and reply:
-            document = self.__document_from(reply)
+            document = self.__attachment_from(reply, ["doc"])
 
         reply_to = None
         if reply:
@@ -62,6 +62,8 @@ class VkTransport:
                 peer_id,
                 int(reply.get("conversation_message_id") or reply["id"]),
                 Platform.VK,
+                reply.get("text") or None,
+                self.__attachment_from(reply),
             )
 
         return IncomingMessage(
@@ -71,7 +73,7 @@ class VkTransport:
             self.__handle_for(sender_id),
             message_id,
             text=message.get("text") or None,
-            content_type="document" if document is not None else "text",
+            attachment=self.__attachment_from(message),
             document=document,
             reply_to=reply_to,
         )

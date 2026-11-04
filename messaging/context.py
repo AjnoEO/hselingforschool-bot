@@ -41,8 +41,6 @@ class Context: # TODO: Точно надо? Точно не слишком те�
         self.peer_id = event.peer_id if event is not None else None
         self.message_id = event.ref.message_id if event is not None else None
         self.text = event.text if isinstance(event, IncomingMessage) else None
-        self.caption = event.caption if isinstance(event, IncomingMessage) else None
-        self.content_type = event.content_type if isinstance(event, IncomingMessage) else None
         self.document = event.document if isinstance(event, IncomingMessage) else None
         self.reply_to = event.reply_to if isinstance(event, IncomingMessage) else None
 
@@ -58,74 +56,36 @@ class Context: # TODO: Точно надо? Точно не слишком те�
 
     def reply(self, text: str, *, keyboard: Keyboard | RemoveKeyboard | None = None) -> MessageRef:
         ref = self.__ref()
-        return self.messenger.send_text(ref.peer_id, text, keyboard=keyboard)
+        return self.messenger.send(ref.peer_id, text, keyboard=keyboard)
 
-    def send_text(
+    def send(
         self,
         peer_id: int,
-        text: str,
+        text: str = None,
         *,
+        media: Media | None = None,
         keyboard: Keyboard | RemoveKeyboard | None = None,
         reply_to: MessageRef | None = None,
+        show_caption_above_media: bool = False
     ) -> MessageRef:
-        return self.messenger.send_text(peer_id, text, keyboard=keyboard, reply_to=reply_to)
-
-    def notify(self, user, text: str, *, keyboard: Keyboard | RemoveKeyboard | None = None) -> MessageRef:
-        return self.messengers.notify(user, text, keyboard=keyboard)
-
-    def send_photo(
-        self,
-        peer_id: int,
-        media: Media,
-        *,
-        caption: str = "",
-        keyboard: Keyboard | RemoveKeyboard | None = None,
-        show_caption_above_media: bool = False,
-    ) -> MessageRef:
-        return self.messenger.send_photo(
-            peer_id,
-            media,
-            caption=caption,
-            keyboard=keyboard,
-            show_caption_above_media=show_caption_above_media,
+        return self.messenger.send(
+            peer_id, text, media=media, keyboard=keyboard, reply_to=reply_to,
+            show_caption_above_media=show_caption_above_media
         )
 
-    def notify_photo(
+    def notify(
         self,
         user,
-        media: Media,
+        text: str,
         *,
-        caption: str = "",
+        media: Media | None = None,
         keyboard: Keyboard | RemoveKeyboard | None = None,
-        show_caption_above_media: bool = False,
+        show_caption_above_media: bool = False
     ) -> MessageRef:
-        return self.messengers.notify_photo(
-            user,
-            media,
-            caption=caption,
-            keyboard=keyboard,
-            show_caption_above_media=show_caption_above_media,
+        return self.messengers.notify(
+            user, text, media=media, keyboard=keyboard,
+            show_caption_above_media=show_caption_above_media
         )
-
-    def send_document(
-        self,
-        peer_id: int,
-        media: Media,
-        *,
-        caption: str = "",
-        keyboard: Keyboard | RemoveKeyboard | None = None,
-    ) -> MessageRef:
-        return self.messenger.send_document(peer_id, media, caption=caption, keyboard=keyboard)
-
-    def notify_document(
-        self,
-        user,
-        media: Media,
-        *,
-        caption: str = "",
-        keyboard: Keyboard | RemoveKeyboard | None = None,
-    ) -> MessageRef:
-        return self.messengers.notify_document(user, media, caption=caption, keyboard=keyboard)
 
     def download_document(self) -> bytes:
         if self.document is None:
@@ -163,3 +123,6 @@ class Context: # TODO: Точно надо? Точно не слишком те�
 
     def copy_to(self, user, ref: MessageRef) -> MessageRef:
         return self.messengers.copy_message(user, ref)
+
+    def copy_to_many(self, users, ref: MessageRef):
+        self.messengers.copy_many(users, ref)

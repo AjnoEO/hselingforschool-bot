@@ -6,6 +6,19 @@ from .events import IncomingCallback, IncomingMessage
 from .telegram import TelegramMessenger
 from .types import Document, MessageRef
 
+def _get_attachment(message: Message) -> Document:
+    if message.document:
+        return Document(
+            message.document.file_id,
+            message.document.file_name,
+            message.document.mime_type
+        )
+    if message.photo:
+        photo = message.photo[0]
+        return Document(
+            photo.file_id,
+            mime_type="photo"
+        )
 
 class TelegramTransport:
     """Приём обновлений Telegram и преобразование их в нейтральные события"""
@@ -47,6 +60,8 @@ class TelegramTransport:
                 message.reply_to_message.chat.id,
                 message.reply_to_message.message_id,
                 Platform.TELEGRAM,
+                message.reply_to_message.text or message.reply_to_message.caption,
+                _get_attachment(message)
             )
         return IncomingMessage(
             Platform.TELEGRAM,
@@ -54,9 +69,8 @@ class TelegramTransport:
             message.from_user.id,
             message.from_user.username or str(message.from_user.id),
             message.message_id,
-            text=message.text,
-            caption=message.caption,
-            content_type="document" if message.document is not None else "text",
+            text=message.text or message.caption,
+            attachment=_get_attachment(message),
             document=document,
             reply_to=reply_to,
         )
