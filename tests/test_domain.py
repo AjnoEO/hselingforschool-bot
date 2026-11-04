@@ -87,8 +87,8 @@ class OlympMembersListTest(DatabaseTestCase):
             [p for p in self.participants_list if p.finished],
         )
         self.assertListEqual(
-            self.olymp.get_participants(grades=[8, 9]),
-            [p for p in self.participants_list if p.grade in [8, 9]]
+            self.olymp.get_participants(junior=True),
+            [p for p in self.participants_list if p.grade < 10]
         )
         self.assertListEqual(
             self.olymp.get_participants(platform=Platform.TELEGRAM),
@@ -97,20 +97,20 @@ class OlympMembersListTest(DatabaseTestCase):
 
     def test_participants_multi_filter(self):
         self.assertListEqual(
-            self.olymp.get_participants(finished=True, grades=[10, 11]),
-            [p for p in self.participants_list if p.finished and p.grade in [10, 11]],
+            self.olymp.get_participants(finished=True, junior=False),
+            [p for p in self.participants_list if p.finished and p.grade >= 10],
         )
         self.assertListEqual(
-            self.olymp.get_participants(grades=[8, 9], platform=Platform.VK),
-            [p for p in self.participants_list if p.grade in [8, 9] and p.platform == Platform.VK]
+            self.olymp.get_participants(junior=True, platform=Platform.VK),
+            [p for p in self.participants_list if p.grade < 10 and p.platform == Platform.VK]
         )
         self.assertListEqual(
             self.olymp.get_participants(platform=Platform.TELEGRAM, finished=False),
             [p for p in self.participants_list if p.platform == Platform.TELEGRAM and not p.finished]
         )
         self.assertListEqual(
-            self.olymp.get_participants(platform=Platform.VK, grades=[10, 11], finished=False),
-            [p for p in self.participants_list if p.platform == Platform.VK and p.grade in [10, 11] and not p.finished]
+            self.olymp.get_participants(platform=Platform.VK, junior=False, finished=False),
+            [p for p in self.participants_list if p.platform == Platform.VK and p.grade >= 10 and not p.finished]
         )
 
     def test_examiners_no_filters(self):
