@@ -10,6 +10,9 @@ class Messenger:
     def ref_for(self, message) -> MessageRef:
         raise NotImplementedError
 
+    def get_contents(self, message: MessageRef) -> dict[str, str]:
+        raise NotImplementedError
+
     def send(
         self,
         peer_id: int,
@@ -53,6 +56,17 @@ class Messenger:
         raise NotImplementedError
 
     def copy_message(self, peer_id: int, ref: MessageRef) -> MessageRef:
+        if self.platform != ref.platform and ref.text is None and ref.media is None:
+            raise ValueError(
+                f"Данные о содержании сообщения {ref} недоступны. "
+                f"Пересылка из {ref.platform} в {self.platform} невозможна")
+        raise NotImplementedError
+
+    def copy_many(self, peer_ids: list[int], ref: MessageRef) -> None:
+        if self.platform != ref.platform and ref.text is None and ref.media is None:
+            raise ValueError(
+                f"Данные о содержании сообщения {ref} недоступны. "
+                f"Пересылка из {ref.platform} в {self.platform} невозможна")
         raise NotImplementedError
 
     def download_document(self, document: Document) -> bytes:

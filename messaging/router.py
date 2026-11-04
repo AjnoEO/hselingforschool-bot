@@ -39,10 +39,7 @@ class Router:
             if "func" in filters and not filters["func"](ctx):
                 return False
         else:
-            content_types = filters.get("content_types", ["text"])
-            if ctx.content_type not in content_types:
-                return False
-            command = extract_command(ctx.text or ctx.caption)
+            command = extract_command(ctx.text)
             if "commands" in filters and command not in filters["commands"]: # TODO: Collapse into one filter?
                 return False
             if "doc_commands" in filters and command not in filters["doc_commands"]:

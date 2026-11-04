@@ -127,7 +127,7 @@ class TelegramMessengerTest(unittest.TestCase):
         self.assertIsInstance(self.bot.calls[-1][2]["document"], InputFile)
 
     def test_edit_delete_answer_and_copy(self):
-        ref = MessageRef(10, 20)
+        ref = MessageRef(10, 20, Platform.TELEGRAM)
         self.messenger.edit_text(ref, "Новый текст", keyboard=None)
         self.assertEqual(self.bot.calls[-1][0], "edit_message_text")
         self.assertEqual(self.bot.calls[-1][1:4], (10, 20, "Новый текст"))

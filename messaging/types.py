@@ -4,10 +4,13 @@ from enums import Platform
 class MessageRef:
     """Ссылка на сообщение, не зависящая от мессенджера"""
 
-    def __init__(self, peer_id: int, message_id: int, platform: Platform = Platform.TELEGRAM):
+    def __init__(self, peer_id: int, message_id: int, platform: Platform,
+                 text: str | None = None, media: Document | Media | None = None):
         self.peer_id: int = peer_id
         self.message_id: int = message_id
         self.platform: Platform = platform
+        self.text = text
+        self.media = media
 
 
 class Button:

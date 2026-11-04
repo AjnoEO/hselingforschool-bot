@@ -67,7 +67,7 @@ class MessengerRegistry:
         media: Media = None,
         keyboard: Keyboard | RemoveKeyboard | None | Callable[[Any], Keyboard | RemoveKeyboard | None] = None,
         show_caption_above_media: bool = False,
-        only_registered: bool = True   
+        only_registered: bool = True
     ) -> None:
         unique_text_per_user = False
         if isinstance(text, Callable):
@@ -125,6 +125,23 @@ class MessengerRegistry:
 
     def copy_message(self, user, ref: MessageRef) -> MessageRef:
         self.__check_user(user)
-        if ref.platform != user.platform:
-            raise NotImplementedError("Пересылка сообщений между мессенджерами пока не поддерживается")
+        # if ref.platform != user.platform:
+        #     raise NotImplementedError("Пересылка сообщений между мессенджерами пока не поддерживается")
         return self.for_platform(user.platform).copy_message(user.external_id, ref)
+
+    def copy_many(self, users, ref: MessageRef, *, only_registered: bool = True) -> None:
+        error_list: list[Exception] = []
+        platform_to_user_ids: defaultdict[Platform, list] = defaultdict(lambda: [])
+        for user in users:
+            try:
+                self.__check_user(user)
+                platform_to_user_ids[user.platform].append(user.external_id)
+            except ValueError as exc:
+                if not only_registered: error_list.append(exc)
+        for platform, user_ids in platform_to_user_ids.items():
+            try:
+                self.for_platform(platform).copy_many(user_ids, ref)
+            except MultiError as new_multierror:
+                error_list.extend(new_multierror.error_list)
+        multierror = MultiError(error_list, "при рассылке сообщений")
+        multierror.clean_raise()

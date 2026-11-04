@@ -7,12 +7,12 @@ class FakeMessenger:
         self.calls = []
 
     def ref_for(self, message):
-        return MessageRef(message.chat.id, message.message_id)
+        return MessageRef(message.chat.id, message.message_id, self.platform)
 
     def send(self, peer_id, text, *, media=None, keyboard=None, reply_to=None, show_caption_above_media=False):
         msg_type = "text" if not media else "photo" if media.is_img else "document"
         self.calls.append((msg_type, peer_id, text, media, keyboard))
-        return MessageRef(peer_id, 1)
+        return MessageRef(peer_id, 1, self.platform)
 
     def edit_text(self, ref, text, *, keyboard=None):
         self.calls.append(("edit_text", ref, text, keyboard))
@@ -28,7 +28,7 @@ class FakeMessenger:
 
     def copy_message(self, peer_id, ref):
         self.calls.append(("copy", peer_id, ref))
-        return MessageRef(peer_id, 1)
+        return MessageRef(peer_id, 1, self.platform)
 
     def download_document(self, document):
         self.calls.append(("download", document))

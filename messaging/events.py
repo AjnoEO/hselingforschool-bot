@@ -40,22 +40,20 @@ class IncomingMessage(Event):
         message_id: int,
         *,
         text: str | None = None,
-        caption: str | None = None,
-        content_type: str = "text",
+        attachment: Document | None = None,
         document: Document | None = None,
         reply_to: MessageRef | None = None,
     ):
         super().__init__(platform, peer_id, sender_id, sender_handle)
         self.message_id = message_id
         self.text = text
-        self.caption = caption
-        self.content_type = content_type
+        self.attachment = attachment
         self.document = document
         self.reply_to = reply_to
 
     @property
     def ref(self) -> MessageRef:
-        return MessageRef(self.peer_id, self.message_id, self.platform)
+        return MessageRef(self.peer_id, self.message_id, self.platform, self.text, self.attachment)
 
     @property
     def is_callback(self) -> bool:

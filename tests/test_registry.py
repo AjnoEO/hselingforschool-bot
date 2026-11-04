@@ -39,11 +39,11 @@ class MessengerRegistryTest(unittest.TestCase):
         self.assertEqual(self.telegram.calls[-1][:4], ("photo", 10, "photo", img_media))
         self.assertEqual(self.vk.calls[-1][:4], ("document", 20, "document", file_media))
 
-    def test_copy_between_platforms_is_rejected(self):
+    def test_copy_between_platforms(self):
         telegram_user = SimpleNamespace(platform=Platform.TELEGRAM, external_id=10)
         vk_message = MessageRef(20, 1, Platform.VK)
-        with self.assertRaises(NotImplementedError):
-            self.registry.copy_message(telegram_user, vk_message)
+        self.registry.copy_message(telegram_user, vk_message)
+        self.assertEqual(self.telegram.calls[-1][:2], ("copy", 10))        
 
     def test_copy_same_platform(self):
         telegram_user = SimpleNamespace(platform=Platform.TELEGRAM, external_id=10)

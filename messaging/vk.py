@@ -108,32 +108,11 @@ class VkMessenger(Messenger):
             return file.name, file.name
         raise ValueError("У медиа нет ни пути, ни данных")
 
-    # def __upload_photo(self, path: str, peer_id: int) -> dict:
-    #     # VkUpload.photo_messages sends the file as "file0", but VK's messages
-    #     # photo upload server expects the field "photo".
-    #     url = self.api.photos.getMessagesUploadServer(peer_id=peer_id)["upload_url"]
-    #     with open(path, "rb") as photo:
-    #         response = requests.post(
-    #             url,
-    #             files={"photo": (os.path.basename(path), photo)},
-    #             timeout=30,
-    #         )
-    #     try:
-    #         data = response.json()
-    #     except ValueError as error:
-    #         # TODO: повторять загрузку и разбирать v2/bulk_upload
-    #         raise RuntimeError(f"VK photo upload failed: HTTP {response.status_code}") from error
-    #     if data.get("error"):
-    #         raise RuntimeError(f"VK photo upload failed: {data['error']}")
-    #     return self.api.photos.saveMessagesPhoto(
-    #         server=data["server"],
-    #         photo=data["photo"],
-    #         hash=data["hash"],
-    #     )[0]
-
-    def __send(self, peer_id: int | list[int], text: str | None = None, *, media: Media | None = None,
+    def __send(self, peer_id: int | list[int], text: str | None = None, *,
+               media: Document | Media | None = None,
                keyboard: Keyboard | RemoveKeyboard | None = None,
-               reply_to: MessageRef | None = None) -> MessageRef:
+               reply_to: MessageRef | None = None,
+               forward_message: MessageRef | None = None) -> MessageRef:
         params = {
             "peer_ids" if isinstance(peer_id, list) else "peer_id": peer_id,
             "random_id": secrets.randbelow(2 ** 31),
@@ -145,11 +124,9 @@ class VkMessenger(Messenger):
             try:
                 if media.is_img:
                     attachment_type = "photo"
-                    # uploaded = self.__upload_photo(path, peer_id)
                     uploaded = self.upload.photo_messages(path, peer_id)[0]
                 else:
                     attachment_type = "doc"
-                    # uploaded = self.upload.document(path, title=media.filename, message_peer_id=peer_id)["doc"]
                     uploaded = self.upload.document_message(path, title=media.filename, peer_id=peer_id)["doc"]
             finally:
                 if temporary:
@@ -162,29 +139,28 @@ class VkMessenger(Messenger):
         if reply_to is not None:
             # TODO: проверить, что VK ждёт именно conversation_message_id, а не глобальный id
             params["reply_to"] = reply_to.message_id
+        if forward_message is not None:
+            params["forward_messages"]=forward_message.message_id
         # TODO: обрабатывать ошибки VK, лимиты длины (MAX_MESSAGE_LENGTH) и повторы
         api_response = self.api.messages.send(**params)
         if isinstance(peer_id, list):
-            messages: list[MessageRef] = []
             error_list: list[VkApiError] = []
             for message_obj in api_response:
                 if "error" in message_obj:
                     error_list.append(VkApiError(message_obj["error"]))
                     continue
                 self.__texts[(message_obj["peer_id"], message_obj["message_id"])] = text
-                messages.append(MessageRef(message_obj["peer_id"], message_obj["message_id"], Platform.VK))
             multierror = MultiError(error_list, "при рассылке сообщений")
             multierror.clean_raise()
-            return messages
         self.__texts[(peer_id, api_response)] = text
         return MessageRef(peer_id, api_response, Platform.VK)
 
     def send(
         self,
         peer_id: int,
-        text: str,
+        text: str = None,
         *,
-        media: Media | None = None,
+        media: Document | Media | None = None,
         keyboard: Keyboard | RemoveKeyboard | None = None,
         reply_to: MessageRef | None = None,
         show_caption_above_media: bool = False
@@ -194,32 +170,13 @@ class VkMessenger(Messenger):
     def send_many(
         self,
         peer_ids: list[int],
-        text: str,
+        text: str = None,
         *,
-        media: Media | None = None,
+        media: Document | Media | None = None,
         keyboard: Keyboard | RemoveKeyboard | None = None,
         show_caption_above_media: bool = False
     ) -> None:
         self.__send(peer_ids, text, media=media, keyboard=keyboard)
-
-    # def send_photo(self, peer_id, media, *, caption="", keyboard=None,
-    #                show_caption_above_media=False) -> MessageRef:
-    #     try:
-    #         path, temporary = self.__path(media)
-    #         try:
-    #             uploaded = self.__upload_photo(path, peer_id)
-    #         finally:
-    #             if temporary:
-    #                 os.unlink(temporary)
-    #     except Exception as error:
-    #         # TODO: пробрасывать ошибку после того, как починим загрузку VK
-    #         print(f"! Не удалось отправить фото в VK: {error}")
-    #         return self.send_text(peer_id, caption or "Не удалось отправить изображение", keyboard=keyboard)
-    #     attachment = f"photo{uploaded['owner_id']}_{uploaded['id']}"
-    #     return self.__send(peer_id, caption, attachment=attachment, keyboard=keyboard)
-
-    # def send_document(self, peer_id, media, *, caption="", keyboard=None) -> MessageRef:
-    #     pass
 
     def edit_text(self, ref, text, *, keyboard=None) -> None:
         params = {
@@ -268,16 +225,27 @@ class VkMessenger(Messenger):
             ),
         )
 
-    def copy_message(self, peer_id, ref) -> MessageRef:
-        # TODO: пересылка между мессенджерами
-        if ref.platform != Platform.VK:
-            raise NotImplementedError("Пересылка сообщений между мессенджерами пока не поддерживается")
-        message_id = self.api.messages.send(
-            peer_id=peer_id,
-            random_id=secrets.randbelow(2 ** 31),
-            forward_messages=ref.message_id,
-        )
-        return MessageRef(peer_id, message_id, Platform.VK)
+    def copy_message(self, peer_id: int, ref: MessageRef) -> MessageRef:
+        if self.platform != ref.platform and ref.text is None and ref.media is None:
+            raise ValueError(
+                f"Данные о содержании сообщения {ref} недоступны. "
+                f"Пересылка из {ref.platform} в {self.platform} невозможна")
+        if self.platform != ref.platform and isinstance(ref.media, Document):
+            raise NotImplementedError(f"Пересылка документов из {ref.platform} в {self.platform} пока невозможна")
+        if self.platform != ref.platform:
+            return self.send(peer_id, ref.text, media=ref.media)
+        return self.__send(peer_id=peer_id, forward_message=ref)
+    
+    def copy_many(self, peer_ids: list[int], ref: MessageRef) -> None:
+        if self.platform != ref.platform and ref.text is None and ref.media is None:
+            raise ValueError(
+                f"Данные о содержании сообщения {ref} недоступны. "
+                f"Пересылка из {ref.platform} в {self.platform} невозможна")
+        if self.platform != ref.platform and isinstance(ref.media, Document):
+            raise NotImplementedError(f"Пересылка документов из {ref.platform} в {self.platform} пока невозможна")
+        if self.platform != ref.platform:
+            self.send_many(peer_ids, ref.text, media=ref.media)
+        return self.__send(peer_id=peer_ids, forward_message=ref)
 
     def download_document(self, document: Document) -> bytes:
         if document.file_id.startswith("http"):

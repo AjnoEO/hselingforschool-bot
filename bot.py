@@ -722,9 +722,9 @@ def upload_members(ctx: Context, required_key: str, key_description: str, member
     ctx.reply(response)
 
 
-@router.message(doc_commands=['upload_participants', 'upload_examiners'], roles=['owner'], content_types=['text', 'document'])
+@router.message(doc_commands=['upload_participants', 'upload_examiners'], roles=['owner'])
 def upload_members_command(ctx: Context):
-    command = extract_command(ctx.text or ctx.caption)
+    command = extract_command(ctx.text)
     if command == 'upload_participants':
         upload_members(
             ctx, "grade", "{0} класс",
@@ -1368,7 +1368,7 @@ def problem_info(ctx: Context):
     ctx.reply(response)
 
 
-@router.message(doc_commands=['problem_block_create'], roles=['owner'], content_types=['text', 'document'])
+@router.message(doc_commands=['problem_block_create'], roles=['owner'])
 def problem_block_create(ctx: Context):
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")

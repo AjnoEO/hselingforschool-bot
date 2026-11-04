@@ -41,8 +41,6 @@ class Context: # TODO: Точно надо? Точно не слишком те�
         self.peer_id = event.peer_id if event is not None else None
         self.message_id = event.ref.message_id if event is not None else None
         self.text = event.text if isinstance(event, IncomingMessage) else None
-        self.caption = event.caption if isinstance(event, IncomingMessage) else None
-        self.content_type = event.content_type if isinstance(event, IncomingMessage) else None
         self.document = event.document if isinstance(event, IncomingMessage) else None
         self.reply_to = event.reply_to if isinstance(event, IncomingMessage) else None
 
@@ -125,3 +123,6 @@ class Context: # TODO: Точно надо? Точно не слишком те�
 
     def copy_to(self, user, ref: MessageRef) -> MessageRef:
         return self.messengers.copy_message(user, ref)
+
+    def copy_to_many(self, users, ref: MessageRef):
+        self.messengers.copy_many(users, ref)

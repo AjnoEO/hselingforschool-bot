@@ -97,7 +97,6 @@ class VkTransportTest(unittest.TestCase):
         }
         event = self.SimpleNamespace(object=self.SimpleNamespace(message=message))
         result = self.transport.to_message_event(event)
-        self.assertEqual(result.content_type, "document")
         self.assertEqual(result.document.file_id, "https://example.com/a.pdf")
 
     def test_callback_event(self):
