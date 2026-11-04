@@ -193,6 +193,7 @@ class Olymp:
         self, start: int | None = None, limit: int | None = None, *, 
         sort: bool = False,
         platform: Platform | str | int | None = None,
+        last_problem_block: int | None = None,
         junior: bool | None = None,
         finished: bool | None = None,
         include_tags: list[Tag] | list[int] | list[str] | None = None,
@@ -207,6 +208,9 @@ class Olymp:
             if isinstance(platform, int): platform = Platform(platform)
             q += f" AND platform = ?"
             params.append(platform)
+        if last_problem_block is not None:
+            q += f" AND last_block_number = ?"
+            params.append(last_problem_block)
         if junior is not None:
             q += f" AND grade {'<' if junior else '>='} 10"
         if finished is not None:

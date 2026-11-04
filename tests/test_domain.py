@@ -47,17 +47,15 @@ class ParticipantQueueFlowTest(DatabaseTestCase):
         self.assertEqual(results[0][:2], (problems[0], True))
 
 
-class OlympMembersListTest(DatabaseTestCase):
+class ParticipantListTest(DatabaseTestCase):
     def setUp(self):
         super().setUp()
         grades = list(range(8, 12))
-        examiner_nos = list(range(5))
         self.olymp = Olymp.create("Тест")
         user_list: list[User] = []
-        for i, _ in enumerate(product(grades + examiner_nos, Platform)):
+        for i, _ in enumerate(product(grades, Platform)):
             user_list.append(User.create(f"user{i}", f"Имя{i}", f"Фамилия{i}"))
         self.participants_list: list[Participant] = []
-        self.examiners_list: list[Examiner] = []
         random.seed(239)
         random.shuffle(user_list)
         for user, (grade, platform) in zip(user_list, product(grades, Platform)):
@@ -65,16 +63,9 @@ class OlympMembersListTest(DatabaseTestCase):
             participant = Participant.create_for_existing_user(user, grade, self.olymp.id)
             if random.randint(0, 1):
                 participant.finished = True
+            participant.last_block_number = random.randint(1, 3)
             self.participants_list.append(participant)
         self.participants_list.sort(key=lambda p: p.user_id)
-        for user, (no, platform) in zip(user_list, product(examiner_nos, Platform)):
-            user.platform = platform
-            examiner = Examiner.create_for_existing_user(user, f"link/{platform.code}{no}", self.olymp.id)
-            if random.randint(0, 1):
-                examiner.is_busy = False
-            examiner.busyness_level = random.randint(0, 5)
-            self.examiners_list.append(examiner)
-        self.examiners_list.sort(key=lambda e: e.user_id)
 
     def test_participants_no_filters(self):
         self.assertListEqual(self.olymp.get_participants(), self.participants_list)
@@ -94,6 +85,10 @@ class OlympMembersListTest(DatabaseTestCase):
             self.olymp.get_participants(platform=Platform.TELEGRAM),
             [p for p in self.participants_list if p.platform == Platform.TELEGRAM]
         )
+        self.assertListEqual(
+            self.olymp.get_participants(last_problem_block=2),
+            [p for p in self.participants_list if p.last_block_number == 2]
+        )
 
     def test_participants_multi_filter(self):
         self.assertListEqual(
@@ -105,13 +100,41 @@ class OlympMembersListTest(DatabaseTestCase):
             [p for p in self.participants_list if p.grade < 10 and p.platform == Platform.VK]
         )
         self.assertListEqual(
-            self.olymp.get_participants(platform=Platform.TELEGRAM, finished=False),
-            [p for p in self.participants_list if p.platform == Platform.TELEGRAM and not p.finished]
+            self.olymp.get_participants(platform=Platform.TELEGRAM, last_problem_block=1),
+            [p for p in self.participants_list if p.platform == Platform.TELEGRAM and p.last_block_number == 1]
         )
         self.assertListEqual(
-            self.olymp.get_participants(platform=Platform.VK, junior=False, finished=False),
-            [p for p in self.participants_list if p.platform == Platform.VK and p.grade >= 10 and not p.finished]
+            self.olymp.get_participants(last_problem_block=3, finished=False),
+            [p for p in self.participants_list if p.last_block_number == 3 and not p.finished]
         )
+        self.assertListEqual(
+            self.olymp.get_participants(platform=Platform.VK, junior=False, last_problem_block=2, finished=False),
+            [
+                p for p in self.participants_list
+                if p.platform == Platform.VK and p.grade >= 10 and p.last_block_number == 2 and not p.finished
+            ]
+        )
+
+
+class ExaminerListTest(DatabaseTestCase):
+    def setUp(self):
+        super().setUp()
+        examiner_nos = list(range(5))
+        self.olymp = Olymp.create("Тест")
+        user_list: list[User] = []
+        for i, _ in enumerate(product(examiner_nos, Platform)):
+            user_list.append(User.create(f"user{i}", f"Имя{i}", f"Фамилия{i}"))
+        self.examiners_list: list[Examiner] = []
+        random.seed(239)
+        random.shuffle(user_list)
+        for user, (no, platform) in zip(user_list, product(examiner_nos, Platform)):
+            user.platform = platform
+            examiner = Examiner.create_for_existing_user(user, f"link/{platform.code}{no}", self.olymp.id)
+            if random.randint(0, 1):
+                examiner.is_busy = False
+            examiner.busyness_level = random.randint(0, 5)
+            self.examiners_list.append(examiner)
+        self.examiners_list.sort(key=lambda e: e.user_id)
 
     def test_examiners_no_filters(self):
         self.assertListEqual(self.olymp.get_examiners(), self.examiners_list)
