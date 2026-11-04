@@ -9,46 +9,7 @@ from problem import Problem, ProblemBlock
 from users import Examiner, Participant
 from tests import DatabaseTestCase
 
-
-class FakeMessenger:
-    def __init__(self, platform=Platform.TELEGRAM):
-        self.platform = platform
-        self.calls = []
-
-    def ref_for(self, message):
-        return MessageRef(message.chat.id, message.message_id)
-
-    def send_text(self, peer_id, text, *, keyboard=None, reply_to=None):
-        self.calls.append(("text", peer_id, text, keyboard))
-        return MessageRef(peer_id, 1)
-
-    def send_photo(self, *args, **kwargs):
-        self.calls.append(("photo", args, kwargs))
-        return MessageRef(0, 1)
-
-    def send_document(self, *args, **kwargs):
-        self.calls.append(("document", args, kwargs))
-        return MessageRef(0, 1)
-
-    def edit_text(self, ref, text, *, keyboard=None):
-        self.calls.append(("edit_text", ref, text, keyboard))
-
-    def edit_keyboard(self, ref, keyboard):
-        self.calls.append(("edit_keyboard", ref, keyboard))
-
-    def delete(self, ref):
-        self.calls.append(("delete", ref))
-
-    def answer_callback(self, callback_id, text="", show_alert=False, *, user_id=None, peer_id=None):
-        self.calls.append(("answer", callback_id, text, show_alert))
-
-    def copy_message(self, peer_id, ref):
-        self.calls.append(("copy", peer_id, ref))
-        return MessageRef(peer_id, 1)
-
-    def download_document(self, document):
-        self.calls.append(("download", document))
-        return b"data"
+from .fake_messenger import FakeMessenger
 
 
 def make_event(text: str, sender_id: int = 10) -> IncomingMessage:

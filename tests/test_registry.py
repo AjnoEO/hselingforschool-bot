@@ -2,29 +2,9 @@ import unittest
 from types import SimpleNamespace
 
 from enums import Platform
-from messaging import Media, MessageRef, MessengerRegistry
+from messaging import Media, FileMedia, MessageRef, MessengerRegistry
 
-
-class FakeMessenger:
-    def __init__(self, platform):
-        self.platform = platform
-        self.calls = []
-
-    def send_text(self, peer_id, text, *, keyboard=None, reply_to=None):
-        self.calls.append(("text", peer_id, text, keyboard))
-        return MessageRef(peer_id, 1, self.platform)
-
-    def send_photo(self, peer_id, media, *, caption="", keyboard=None, show_caption_above_media=False):
-        self.calls.append(("photo", peer_id, media, caption))
-        return MessageRef(peer_id, 1, self.platform)
-
-    def send_document(self, peer_id, media, *, caption="", keyboard=None):
-        self.calls.append(("document", peer_id, media, caption))
-        return MessageRef(peer_id, 1, self.platform)
-
-    def copy_message(self, peer_id, ref):
-        self.calls.append(("copy", peer_id, ref))
-        return MessageRef(peer_id, 1, self.platform)
+from .fake_messenger import FakeMessenger
 
 
 class MessengerRegistryTest(unittest.TestCase):
@@ -50,13 +30,14 @@ class MessengerRegistryTest(unittest.TestCase):
     def test_notify_media_routes_by_platform(self):
         telegram_user = SimpleNamespace(platform=Platform.TELEGRAM, external_id=10)
         vk_user = SimpleNamespace(platform=Platform.VK, external_id=20)
-        media = Media("file.pdf", filename="file.pdf")
+        img_media = Media("file.png", filename="file.png")
+        file_media = FileMedia("file.png", filename="file.png")
 
-        self.registry.notify_photo(telegram_user, media, caption="photo")
-        self.registry.notify_document(vk_user, media, caption="document")
+        self.registry.notify(telegram_user, "photo", media=img_media)
+        self.registry.notify(vk_user, "document", media=file_media)
 
-        self.assertEqual(self.telegram.calls[-1][:4], ("photo", 10, media, "photo"))
-        self.assertEqual(self.vk.calls[-1][:4], ("document", 20, media, "document"))
+        self.assertEqual(self.telegram.calls[-1][:4], ("photo", 10, "photo", img_media))
+        self.assertEqual(self.vk.calls[-1][:4], ("document", 20, "document", file_media))
 
     def test_copy_between_platforms_is_rejected(self):
         telegram_user = SimpleNamespace(platform=Platform.TELEGRAM, external_id=10)
