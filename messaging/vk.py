@@ -131,14 +131,15 @@ class VkMessenger(Messenger):
     #         hash=data["hash"],
     #     )[0]
 
-    def __send(self, peer_id: int | list[int], text: str, *, media: Media | None = None,
+    def __send(self, peer_id: int | list[int], text: str | None = None, *, media: Media | None = None,
                keyboard: Keyboard | RemoveKeyboard | None = None,
                reply_to: MessageRef | None = None) -> MessageRef:
         params = {
             "peer_ids" if isinstance(peer_id, list) else "peer_id": peer_id,
-            "message": html_to_vk(text),
             "random_id": secrets.randbelow(2 ** 31),
         }
+        if text:
+            params["message"] = html_to_vk(text)
         if media:
             path, temporary = self.__path(media)
             try:

@@ -295,7 +295,7 @@ def send_authentication_confirmation(member: OlympMember, *, already_authenticat
         send_all_problem_blocks(member)
         notifier.notify(
             member, BUTTON_HELP,
-            Media(BUTTONS_IMG, filename="Где_кнопки.png"),
+            media=Media(BUTTONS_IMG, filename="Где_кнопки.png"),
             keyboard=participant_keyboard,
             show_caption_above_media=True
         )
@@ -306,7 +306,10 @@ def send_all_problem_blocks(participant: Participant):
         problem_block = participant.problem_block_from_number(problem_block_number)
         notifier.notify(
             participant,
-            FileMedia(problem_block.path or ProblemBlock.DEFAULT_PATH, filename=f"Блок_{problem_block_number}.pdf")
+            media=FileMedia(
+                problem_block.path or ProblemBlock.DEFAULT_PATH,
+                filename=f"Блок_{problem_block_number}.pdf"
+            )
         )
 
 
@@ -423,28 +426,36 @@ def start_olymp():
         raise UserError("Олимпиада уже идёт или завершилась")
     current_olymp.status = OlympStatus.CONTEST
     participants = current_olymp.get_participants()
-    def participant_start_message(platform):
+    junior_participants = current_olymp.get_participants(junior=True)
+    senior_participants = current_olymp.get_participants(junior=False)
+    def participant_start_message(platform: Platform):
         return (f"Олимпиада началась! Можешь приступать к решению задач\n"
                 f"Если у тебя возникли вопросы, обращайся к "
                 f"{' или '.join(ASK_PEOPLE_HANDLES.get(platform, []))} (организационные вопросы) "
                 f"или к {OWNER_HANDLES[platform]} (функционирование бота)")
     error_list: list[Exception] = []
-    for p in participants:
-        if p.external_id:
-            try:
-                problem_block = p.last_block
-                notifier.notify(
-                    p, participant_start_message(p.platform),
-                    media=FileMedia(problem_block.path or ProblemBlock.DEFAULT_PATH, filename="Блок_1.pdf")
-                )
-                notifier.notify(
-                    p, BUTTON_HELP,
-                    media=Media(BUTTONS_IMG, filename="Где_кнопки.png"),
-                    keyboard=participant_keyboard,
-                    show_caption_above_media=True
-                )
-            except Exception as exc:
-                error_list.append(exc)
+    filename = "Блок_1.pdf"
+    junior_first_block = ProblemBlock.from_block_type(current_olymp.id, BlockType.JUNIOR_1)
+    junior_file = FileMedia(junior_first_block.path or ProblemBlock.DEFAULT_PATH, filename=filename)
+    senior_first_block = ProblemBlock.from_block_type(current_olymp.id, BlockType.SENIOR_1)
+    senior_file = FileMedia(senior_first_block.path or ProblemBlock.DEFAULT_PATH, filename=filename)
+    try:
+        notifier.notify_many(junior_participants, participant_start_message, media=junior_file)
+    except MultiError as exc:
+        error_list.extend(exc.error_list)
+    try:
+        notifier.notify_many(senior_participants, participant_start_message, media=senior_file)
+    except MultiError as exc:
+        error_list.extend(exc.error_list)
+    try:
+        notifier.notify_many(
+            participants, BUTTON_HELP,
+            media=Media(BUTTONS_IMG, filename="Где_кнопки.png"),
+            keyboard=participant_keyboard,
+            show_caption_above_media=True
+        )
+    except MultiError as exc:
+        error_list.extend(exc.error_list)
     examiners = current_olymp.get_examiners()
     for e in examiners:
         if e.external_id:
@@ -1921,55 +1932,67 @@ def give_out_problem_block(ctx: Context):
     command = extract_command(ctx.text)
     new_problem_block_number = 2 if command == 'give_out_second_block' else 3
     include_tags, exclude_tags = get_tags_args(ctx.text)
-    participants = current_olymp.get_participants(finished=False, include_tags=include_tags, exclude_tags=exclude_tags)
-    issues_no_prev = 0
-    issues_contact = 0
-    receivers = 0
-    send_error = None
+    kwargs = {
+        'finished': False,
+        'include_tags': include_tags,
+        'exclude_tags': exclude_tags,
+        'last_block_number': new_problem_block_number-1
+    }
+    participants = current_olymp.get_participants(**kwargs)
+    junior_participants = current_olymp.get_participants(**kwargs, junior=True)
+    senior_participants = current_olymp.get_participants(**kwargs, junior=False)
+    prev_participants_amount = (
+        0 if new_problem_block_number == 2
+        else current_olymp.participants_amount(finished=False, last_block_number=1)
+    )
+    current_olymp.participants_amount()
     for p in participants:
-        last_block_number = p.last_block_number
-        if last_block_number < new_problem_block_number - 1:
-            issues_no_prev += 1
-        if last_block_number >= new_problem_block_number:
-            continue
-        receivers += 1
-        new_problem_block = p.give_next_problem_block()
-        if p.external_id is None:
-            continue
-        participant_reply = (
-            f"Тебе выдан {'второй' if last_block_number + 1 == 2 else 'завершающий третий'} блок задач. "
-            f"Теперь можешь решать и сдавать их тоже!"
+        p.give_next_problem_block()
+    participant_reply = (
+        f"Тебе выдан {'второй' if new_problem_block_number == 2 else 'завершающий третий'} блок задач. "
+        f"Теперь можешь решать и сдавать их тоже!"
+    )
+    if PROMOTE_COMMANDS:
+        participant_reply += (f"\nЧтобы записаться на сдачу задачи, используй команду <code>"
+                                + escape_html("/queue <номер задачи>")
+                                + "</code>")
+    filename = f"Блок_{new_problem_block_number}"
+    junior_first_block = ProblemBlock.from_block_type(current_olymp.id, BlockType[f"JUNIOR_{new_problem_block_number}"])
+    junior_file = FileMedia(junior_first_block.path or ProblemBlock.DEFAULT_PATH, filename=filename)
+    senior_first_block = ProblemBlock.from_block_type(current_olymp.id, BlockType[f"SENIOR_{new_problem_block_number}"])
+    senior_file = FileMedia(senior_first_block.path or ProblemBlock.DEFAULT_PATH, filename=filename)
+    error_list = []
+    try:
+        notifier.notify_many(
+            junior_participants, participant_reply, media=junior_file
         )
-        if PROMOTE_COMMANDS:
-            participant_reply += (f"\nЧтобы записаться на сдачу задачи, используй команду <code>"
-                                    + escape_html("/queue <номер задачи>")
-                                    + "</code>")
-        try:
-            notifier.notify(
-                p, participant_reply,
-                FileMedia(
-                    new_problem_block.path or ProblemBlock.DEFAULT_PATH,
-                    filename=f"Блок_{last_block_number + 1}.pdf"
-                )
-            )
-        except Exception as exc:
-            issues_contact += 1
-            send_error = exc
+    except MultiError as exc:
+        error_list.extend(exc.error_list)
+    try:
+        notifier.notify_many(
+            senior_participants, participant_reply, media=senior_file
+        )
+    except MultiError as exc:
+        error_list.extend(exc.error_list)
+    receivers = len(participants) - len(error_list)
     owner_reply = (f"{'Второй' if new_problem_block_number == 2 else 'Третий'} блок задач выдан "
                    f"{receivers} {decline(receivers, 'участник', ('у', 'ам', 'ам'))}")
-    if issues_no_prev:
+    if prev_participants_amount:
         owner_reply += (
-            f"\n⚠️ У {issues_no_prev} {decline(issues_no_prev, 'участник', ('а', 'ов', 'ов'))} "
-            f"не было предыдущего блока!"
+            f"\n⚠️ У {prev_participants_amount} {decline(prev_participants_amount, 'участник', ('а', 'ов', 'ов'))} "
+            f"нет предыдущего блока!"
         )
-    if issues_contact:
+    if error_list:
         owner_reply += (
             f"\n⚠️ Не удалось отправить новый блок "
-            f"{issues_contact} {decline(issues_contact, 'участник', ('у', 'ам', 'ам'))}!"
+            f"{len(error_list)} {decline(len(error_list), 'участник', ('у', 'ам', 'ам'))}!"
         )
     ctx.reply(owner_reply)
-    if issues_contact and (issues_contact > receivers / 2):
-        raise send_error
+    send_error = MultiError(error_list, "при рассылке сообщений")
+    if len(send_error) * 3 > len(participants):
+        send_error.clean_raise()
+    elif send_error:
+        raise UserError(*send_error.args, ignore=True) from error_list[0]
 
 
 @router.message(commands=['give_second_block', 'give_third_block'], roles=['owner'], olymp_statuses=[OlympStatus.CONTEST])

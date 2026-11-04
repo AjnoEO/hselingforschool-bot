@@ -110,8 +110,14 @@ class MessengerRegistry:
                 except ValueError as exc:
                     if not only_registered: error_list.append(exc)
             for platform, user_ids in platform_to_user_ids.items():
+                if isinstance(text, Callable):
+                    msg = text(platform)
+                else:
+                    msg = text
                 try:
-                    self.for_platform(platform).send_many(user_ids, text, keyboard=keyboard)
+                    self.for_platform(platform).send_many(
+                        user_ids, msg, media=media, keyboard=keyboard, show_caption_above_media=show_caption_above_media
+                    )
                 except MultiError as new_multierror:
                     error_list.extend(new_multierror.error_list)
         multierror = MultiError(error_list, "при рассылке сообщений")

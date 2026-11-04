@@ -193,7 +193,7 @@ class Olymp:
         self, start: int | None = None, limit: int | None = None, *, 
         sort: bool = False,
         platform: Platform | str | int | None = None,
-        last_problem_block: int | None = None,
+        last_block_number: int | None = None,
         junior: bool | None = None,
         finished: bool | None = None,
         include_tags: list[Tag] | list[int] | list[str] | None = None,
@@ -208,9 +208,9 @@ class Olymp:
             if isinstance(platform, int): platform = Platform(platform)
             q += f" AND platform = ?"
             params.append(platform)
-        if last_problem_block is not None:
+        if last_block_number is not None:
             q += f" AND last_block_number = ?"
-            params.append(last_problem_block)
+            params.append(last_block_number)
         if junior is not None:
             q += f" AND grade {'<' if junior else '>='} 10"
         if finished is not None:
@@ -228,11 +228,31 @@ class Olymp:
         results = cursor.fetchall()
         return [Participant.from_user_id(user_id_tuple[0], self.id) for user_id_tuple in results]
     
-    def participants_amount(self, finished: bool | None = None) -> int:
-        if finished is None:
-            return self.__amount("participants")
-        else:
-            return self.__amount("participants", ["finished = ?"], [finished])
+    def participants_amount(
+        self,
+        platform: Platform | str | int | None = None,
+        last_block_number: int | None = None,
+        junior: bool | None = None,
+        finished: bool | None = None
+    ) -> int:
+        conditions = []
+        params = []
+        if platform is not None:
+            if isinstance(platform, str):
+                platform = Platform[platform]
+            if isinstance(platform, Platform):
+                platform = platform.value
+            conditions.append("platform = ?")
+            params.append(platform)
+        if last_block_number is not None:
+            conditions.append("last_block_number = ?")
+            params.append(last_block_number)
+        if junior is not None:
+            conditions.append(f"grade {'<' if junior else '>='} 10")
+        if finished is not None:
+            conditions.append("finished = ?")
+            params.append(finished)
+        return self.__amount("participants", conditions, params)
     
     @provide_cursor
     def get_examiners(

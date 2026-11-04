@@ -86,7 +86,7 @@ class ParticipantListTest(DatabaseTestCase):
             [p for p in self.participants_list if p.platform == Platform.TELEGRAM]
         )
         self.assertListEqual(
-            self.olymp.get_participants(last_problem_block=2),
+            self.olymp.get_participants(last_block_number=2),
             [p for p in self.participants_list if p.last_block_number == 2]
         )
 
@@ -100,15 +100,15 @@ class ParticipantListTest(DatabaseTestCase):
             [p for p in self.participants_list if p.grade < 10 and p.platform == Platform.VK]
         )
         self.assertListEqual(
-            self.olymp.get_participants(platform=Platform.TELEGRAM, last_problem_block=1),
+            self.olymp.get_participants(platform=Platform.TELEGRAM, last_block_number=1),
             [p for p in self.participants_list if p.platform == Platform.TELEGRAM and p.last_block_number == 1]
         )
         self.assertListEqual(
-            self.olymp.get_participants(last_problem_block=3, finished=False),
+            self.olymp.get_participants(last_block_number=3, finished=False),
             [p for p in self.participants_list if p.last_block_number == 3 and not p.finished]
         )
         self.assertListEqual(
-            self.olymp.get_participants(platform=Platform.VK, junior=False, last_problem_block=2, finished=False),
+            self.olymp.get_participants(platform=Platform.VK, junior=False, last_block_number=2, finished=False),
             [
                 p for p in self.participants_list
                 if p.platform == Platform.VK and p.grade >= 10 and p.last_block_number == 2 and not p.finished
