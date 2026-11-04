@@ -98,12 +98,16 @@ class TelegramMessenger(Messenger):
         show_caption_above_media: bool = False
     ) -> None:
         error_list: list[Exception] = []
+        ref_to_copy: MessageRef | None = None
         for peer_id in peer_ids:
             try:
-                self.send(
-                    peer_id, text, media=media, keyboard=keyboard, 
-                    show_caption_above_media=show_caption_above_media
-                )
+                if ref_to_copy is not None:
+                    ref_to_copy = self.copy_message(peer_id, ref_to_copy)
+                else:
+                    ref_to_copy = self.send(
+                        peer_id, text, media=media, keyboard=keyboard, 
+                        show_caption_above_media=show_caption_above_media
+                    )
             except Exception as exc:
                 error_list.append(exc)
         multierror = MultiError(error_list, "при рассылке сообщений")
@@ -158,12 +162,15 @@ class TelegramMessenger(Messenger):
             raise NotImplementedError(f"Пересылка документов из {ref.platform} в {self.platform} пока невозможна")
         same_platform = self.platform == ref.platform
         error_list = []
+        ref_to_copy: MessageRef | None = None
         for peer_id in peer_ids:
             try:
                 if same_platform:
                     self.bot.copy_message(peer_id, ref.peer_id, ref.message_id)
+                elif ref_to_copy is not None:
+                    self.bot.copy_message(peer_id, ref_to_copy.peer_id, ref_to_copy.message_id)
                 else:
-                    self.send(peer_id, ref.text, media=ref.media)
+                    ref_to_copy = self.send(peer_id, ref.text, media=ref.media)
             except Exception as exc:
                 error_list.append(exc)
         multierror = MultiError(error_list, "при пересылке сообщения")
