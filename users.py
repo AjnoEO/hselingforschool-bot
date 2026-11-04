@@ -261,6 +261,9 @@ class User:
     def __str__(self):
         return f"{self.full_name} ({self.display_handle()})"
 
+    def __eq__(self, other: User):
+        return self.__class__ == other.__class__ and self.__dict__ == other.__dict__
+
 
     @property
     def user_id(self): return self.__user_id
@@ -279,6 +282,11 @@ class User:
         self.__external_id = value
     @property
     def platform(self): return self.__platform
+    @platform.setter
+    def platform(self, value: Platform | int):
+        if isinstance(value, int): value = Platform(value)
+        self.__set('platform', value.value)
+        self.__platform = value
     @property
     def name(self): return self.__name
     @name.setter
@@ -715,6 +723,7 @@ class Participant(OlympMember):
         return self._queue_entry("participant_id")
 
     def __set(self, column: str, value):
+        if column in self._additional_values: self._additional_values[column] = value
         update_in_table("participants", column, value, "id", self.__id)
     
     @property
@@ -1025,6 +1034,7 @@ class Examiner(OlympMember):
         return self._queue_entry("examiner_id")
     
     def __set(self, column: str, value):
+        if column in self._additional_values: self._additional_values[column] = value
         update_in_table("examiners", column, value, "id", self.__id)
 
     @property

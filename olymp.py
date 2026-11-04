@@ -1,4 +1,4 @@
-from enums import OlympStatus, QueueStatus
+from enums import OlympStatus, QueueStatus, Platform
 from sqlite3 import Cursor
 from db import db_connection
 from tag import Tag
@@ -135,7 +135,8 @@ class Olymp:
     def __tag_condition(
         self, table: str,
         include_tags: list[Tag] | list[int] | list[str] | None = None,
-        exclude_tags: list[Tag] | list[int] | list[str] | None = None
+        exclude_tags: list[Tag] | list[int] | list[str] | None = None,
+        user_data: bool = False
     ) -> tuple[str, list]:
         """
         :return: `query`, `params`
@@ -177,6 +178,7 @@ class Olymp:
             params.extend(exclude_tags)
         q = "WITH " + ", ".join(with_clauses) + "\n" if with_clauses else ""
         q += f"SELECT user_id FROM {table} "
+        if user_data: q += "LEFT JOIN users USING (user_id) "
         if include_tags: q += "LEFT JOIN user_lacking_required_tags l USING (user_id) "
         if exclude_tags: q += "LEFT JOIN user_excluded_tags e USING (user_id) "
         q += "WHERE olymp_id = ?"
@@ -189,14 +191,25 @@ class Olymp:
     @provide_cursor
     def get_participants(
         self, start: int | None = None, limit: int | None = None, *, 
-        sort: bool = False, finished: bool | None = None, 
+        sort: bool = False,
+        platform: Platform | str | int | None = None,
+        grades: list[int] | None = None,
+        finished: bool | None = None,
         include_tags: list[Tag] | list[int] | list[str] | None = None,
         exclude_tags: list[Tag] | list[int] | list[str] | None = None,
         cursor: Cursor | None = None
     ) -> list[Participant]:
         if not limit and start:
             raise ValueError("Нельзя устанавливать начало списка участников, не устанавливая ограничение на количество")
-        q, params = self.__tag_condition("participants", include_tags, exclude_tags)
+        q, params = self.__tag_condition("participants", include_tags, exclude_tags, user_data=(platform is not None))
+        if platform is not None:
+            if isinstance(platform, str): platform = Platform[platform]
+            if isinstance(platform, int): platform = Platform(platform)
+            q += f" AND platform = ?"
+            params.append(platform)
+        if grades is not None:
+            q += f" AND grade IN ({', '.join(['?'] * len(grades))})"
+            params.extend(grades)
         if finished is not None:
             q += f" AND finished = ?"
             params.append(finished)
@@ -221,14 +234,22 @@ class Olymp:
     @provide_cursor
     def get_examiners(
         self, start: int | None = None, limit: int | None = None, *,
-        sort: bool = False, only_free: bool = False, order_by_busyness: bool = False, 
+        sort: bool = False,
+        platform: Platform | str | int | None = None,
+        only_free: bool = False,
+        order_by_busyness: bool = False,
         include_tags: list[Tag] | list[int] | list[str] | None = None,
         exclude_tags: list[Tag] | list[int] | list[str] | None = None,
         cursor: Cursor | None = None
     ) -> list[Examiner]:
         if not limit and start:
             raise ValueError("Нельзя устанавливать начало списка принимающих, не устанавливая ограничение на количество")
-        q, params = self.__tag_condition("examiners", include_tags, exclude_tags)
+        q, params = self.__tag_condition("examiners", include_tags, exclude_tags, user_data=(platform is not None))
+        if platform is not None:
+            if isinstance(platform, str): platform = Platform[platform]
+            if isinstance(platform, int): platform = Platform(platform)
+            q += f" AND platform = ?"
+            params.append(platform)
         if only_free:
             q += " AND is_busy = 0"
         if order_by_busyness:
