@@ -30,7 +30,11 @@ class Problem:
     def from_name(cls, name: str, olymp_id: int, no_error: bool = False):
         with db_connection() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT * FROM problems WHERE name = ? AND olymp_id = ?", (name, olymp_id))
+            q = "SELECT * FROM problems WHERE name = ? AND olymp_id = ?"
+            if name.endswith("…"):
+                name = name[:-1]
+                q = "SELECT * FROM problems WHERE name LIKE (? || '%') AND olymp_id = ?"
+            cur.execute(q, (name, olymp_id))
             fetch = cur.fetchone()
         if not fetch:
             if no_error:
