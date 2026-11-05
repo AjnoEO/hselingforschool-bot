@@ -12,6 +12,7 @@ from vk_api.upload import VkUpload
 from vk_api.exceptions import VkApiError
 
 from enums import Platform
+from data import VK_GROUP_ID
 from .base import Messenger
 from .types import (
     Document, Keyboard, Media, MessageRef, RemoveKeyboard,
@@ -122,12 +123,15 @@ class VkMessenger(Messenger):
         if media:
             path, temporary = self.__path(media)
             try:
+                media_peer_id = peer_id[0] if isinstance(peer_id, list) else peer_id
                 if media.is_img:
                     attachment_type = "photo"
-                    uploaded = self.upload.photo_messages(path, peer_id)[0]
+                    # uploaded = self.upload.photo(path, -64, group_id=VK_GROUP_ID)[0]
+                    uploaded = self.upload.photo_messages(path, media_peer_id)[0]
                 else:
                     attachment_type = "doc"
-                    uploaded = self.upload.document_message(path, title=media.filename, peer_id=peer_id)["doc"]
+                    # uploaded = self.upload.document(path, title=media.filename, group_id=VK_GROUP_ID)["doc"]
+                    uploaded = self.upload.document_message(path, title=media.filename, peer_id=media_peer_id)["doc"]
             finally:
                 if temporary:
                     os.unlink(temporary)
