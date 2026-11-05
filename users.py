@@ -206,8 +206,10 @@ class User:
                 tag_list.append(str(tag))
         if tag_list:
             return result + sep.join(tag_list) + end
-        else:
+        elif result:
             return result + end
+        else:
+            return ""
 
     def add_tag(self, tag: Tag | int):
         if isinstance(tag, Tag):
