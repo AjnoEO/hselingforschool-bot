@@ -1,4 +1,6 @@
 import json
+import time
+import traceback
 
 from vk_api import VkApi
 from vk_api.bot_longpoll import VkBotEventType, VkBotLongPoll, VkBotEvent
@@ -7,6 +9,10 @@ from enums import Platform
 from .events import IncomingCallback, IncomingMessage
 from .types import Document, MessageRef
 from .vk import VkMessenger
+
+
+# Пауза перед перезапуском опроса после ошибки (как в telebot.infinity_polling)
+POLLING_RETRY_DELAY = 5
 
 
 class VkTransport:
@@ -98,17 +104,28 @@ class VkTransport:
             MessageRef(peer_id, message_id, Platform.VK),
         )
 
+    def __dispatch(self, event: VkBotEvent):
+        try:
+            if event.type == VkBotEventType.MESSAGE_NEW:
+                self.on_event(self.to_message_event(event))
+            elif event.type == VkBotEventType.MESSAGE_EVENT:
+                callback = self.to_callback_event(event)
+                print(f"VK: message_event {callback.callback_id} data={callback.data!r}")
+                self.on_event(callback)
+        except Exception:
+            # TODO: логировать
+            traceback.print_exc()
+
     def start(self):
-        self.longpoll = VkBotLongPoll(self.vk, self.group_id)
-        for event in self.longpoll.listen():
+        # Аналог telebot.infinity_polling: любая ошибка long poll (сеть, VK API,
+        # разбор ответа) не должна останавливать чтение обновлений навсегда.
+        while True:
             try:
-                if event.type == VkBotEventType.MESSAGE_NEW:
-                    self.on_event(self.to_message_event(event))
-                elif event.type == VkBotEventType.MESSAGE_EVENT:
-                    callback = self.to_callback_event(event)
-                    print(f"VK: message_event {callback.callback_id} data={callback.data!r}")
-                    self.on_event(callback)
+                if self.longpoll is None:
+                    self.longpoll = VkBotLongPoll(self.vk, self.group_id)
+                for event in self.longpoll.listen():
+                    self.__dispatch(event)
             except Exception:
-                # TODO: логировать и не терять polling при ошибке обработчика
-                import traceback
                 traceback.print_exc()
+                print(f"VK: polling упал, перезапускаю через {POLLING_RETRY_DELAY} с")
+                time.sleep(POLLING_RETRY_DELAY)

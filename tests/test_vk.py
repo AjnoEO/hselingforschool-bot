@@ -113,6 +113,25 @@ class VkTransportTest(unittest.TestCase):
         self.assertEqual(result.data, "join_queue_1")
         self.assertEqual(result.ref.message_id, 40)
 
+    def test_polling_restarts_after_longpoll_error(self):
+        from unittest.mock import MagicMock, patch
+
+        transport = object.__new__(VkTransport)
+        transport.on_event = MagicMock()
+        transport.vk = MagicMock()
+        transport.group_id = 1
+        transport.longpoll = MagicMock()
+        # Первый заход падает, второй завершает тест уже не перехватываемым исключением.
+        transport.longpoll.listen.side_effect = [ConnectionError("boom"), SystemExit]
+
+        with patch("messaging.vk_transport.traceback.print_exc"), \
+             patch("messaging.vk_transport.time.sleep") as sleep:
+            with self.assertRaises(SystemExit):
+                transport.start()
+
+        self.assertEqual(transport.longpoll.listen.call_count, 2)
+        sleep.assert_called_once()
+
 
 class PlatformIdentityTest(unittest.TestCase):
     def test_parse_identity_arg(self):
