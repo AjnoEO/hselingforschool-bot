@@ -154,7 +154,7 @@ class User:
         handle = handle.lower().strip()
         if handle.startswith("@"):
             handle = handle[1:]
-        return handle
+        return handle.lstrip()
 
 
     @provide_cursor
