@@ -16,6 +16,9 @@ from utils import MultiError
 
 
 class TelegramMessenger(Messenger):
+    platform = Platform.TELEGRAM
+    api_exceptions = ConnectionError
+
     def __init__(self, bot: TeleBot):
         self.bot = bot
 
@@ -65,7 +68,8 @@ class TelegramMessenger(Messenger):
         if (media is None or not is_img) and show_caption_above_media:
             ValueError("Нельзя устанавливать show_caption_above_media при отсутствии изображения")
         if is_img:
-            message = self.bot.send_photo(
+            message = self._retry_method(
+                self.bot.send_photo,
                 peer_id,
                 photo=self.__input_file(media),
                 caption=text,
@@ -73,14 +77,16 @@ class TelegramMessenger(Messenger):
                 show_caption_above_media=show_caption_above_media,
             )
         elif media:
-            message = self.bot.send_document(
+            message = self._retry_method(
+                self.bot.send_document,
                 peer_id,
                 document=self.__input_file(media),
                 caption=text,
                 reply_markup=self.__markup(keyboard),
             )
         else:
-            message = self.bot.send_message(
+            message = self._retry_method(
+                self.bot.send_message,
                 peer_id,
                 text,
                 reply_markup=self.__markup(keyboard),
@@ -120,7 +126,8 @@ class TelegramMessenger(Messenger):
         *,
         keyboard: Keyboard | RemoveKeyboard | None = None,
     ) -> None:
-        self.bot.edit_message_text(
+        self._retry_method(
+            self.bot.edit_message_text,
             text,
             ref.peer_id,
             ref.message_id,
@@ -128,18 +135,19 @@ class TelegramMessenger(Messenger):
         )
 
     def edit_keyboard(self, ref: MessageRef, keyboard: Keyboard | RemoveKeyboard | None) -> None:
-        self.bot.edit_message_reply_markup(
+        self._retry_method(
+            self.bot.edit_message_reply_markup,
             ref.peer_id,
             ref.message_id,
             reply_markup=self.__markup(keyboard),
         )
 
     def delete(self, ref: MessageRef) -> None:
-        self.bot.delete_message(ref.peer_id, ref.message_id)
+        self._retry_method(self.bot.delete_message, ref.peer_id, ref.message_id)
 
     def answer_callback(self, callback_id: str, text: str = "", show_alert: bool = False,
                         *, user_id: int | None = None, peer_id: int | None = None) -> None:
-        self.bot.answer_callback_query(callback_id, text=text, show_alert=show_alert)
+        self._retry_method(self.bot.answer_callback_query, callback_id, text=text, show_alert=show_alert)
 
     def copy_message(self, peer_id: int, ref: MessageRef) -> MessageRef:
         if self.platform != ref.platform and ref.text is None and ref.media is None:
@@ -150,7 +158,7 @@ class TelegramMessenger(Messenger):
             raise NotImplementedError(f"Пересылка документов из {ref.platform} в {self.platform} пока невозможна")
         elif self.platform != ref.platform:
             return self.send(peer_id, ref.text, media=ref.media)
-        message = self.bot.copy_message(peer_id, ref.peer_id, ref.message_id)
+        message = self._retry_method(self.bot.copy_message, peer_id, ref.peer_id, ref.message_id)
         return MessageRef(peer_id, message.message_id, self.platform)
 
     def copy_many(self, peer_ids: list[int], ref: MessageRef) -> None:
@@ -166,9 +174,9 @@ class TelegramMessenger(Messenger):
         for peer_id in peer_ids:
             try:
                 if same_platform:
-                    self.bot.copy_message(peer_id, ref.peer_id, ref.message_id)
+                    self._retry_method(self.bot.copy_message, peer_id, ref.peer_id, ref.message_id)
                 elif ref_to_copy is not None:
-                    self.bot.copy_message(peer_id, ref_to_copy.peer_id, ref_to_copy.message_id)
+                    self._retry_method(self.bot.copy_message, peer_id, ref_to_copy.peer_id, ref_to_copy.message_id)
                 else:
                     ref_to_copy = self.send(peer_id, ref.text, media=ref.media)
             except Exception as exc:
@@ -177,6 +185,6 @@ class TelegramMessenger(Messenger):
         multierror.clean_raise()
 
     def download_document(self, document: Document) -> bytes:
-        file = self.bot.get_file(document.file_id)
+        file = self._retry_method(self.bot.get_file, document.file_id)
         url = f"https://api.telegram.org/file/bot{self.bot.token}/{file.file_path}"
         return requests.get(url).content

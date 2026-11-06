@@ -6,6 +6,18 @@ class Messenger:
     """Интерфейс мессенджера. Конкретная реализация занимается разметкой и медиа."""
 
     platform: Platform = Platform.TELEGRAM
+    api_exceptions = ConnectionError
+
+    @classmethod
+    def _retry_method(cls, method, *args, max_retries: int = 5, **kwargs):
+        while max_retries:
+            try:
+                return method(*args, **kwargs)
+            except cls.api_exceptions as exc:
+                max_retries -= 1
+                print("!E >>", exc)
+                if not max_retries:
+                    raise exc
 
     def ref_for(self, message) -> MessageRef:
         raise NotImplementedError

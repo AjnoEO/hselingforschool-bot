@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import secrets
 import tempfile
 from html.parser import HTMLParser
@@ -62,6 +63,7 @@ def html_to_vk(text: str) -> str:
     result = "".join(parser.parts)
     while "\n\n\n" in result:
         result = result.replace("\n\n\n", "\n\n")
+    result = re.sub(r"(@\w+)(\s*\(.+?\))", r"\1 (\1)\2", result)
     return result.strip()
 
 
@@ -88,6 +90,7 @@ def vk_keyboard(keyboard: Keyboard | RemoveKeyboard | None) -> str | None:
 
 class VkMessenger(Messenger):
     platform = Platform.VK
+    api_exceptions = (VkApiError, requests.exceptions.JSONDecodeError) # TODO: Предложить правку в либе vk_api?
 
     def __init__(self, vk: VkApi):
         self.vk = vk
@@ -109,6 +112,12 @@ class VkMessenger(Messenger):
             return file.name, file.name
         raise ValueError("У медиа нет ни пути, ни данных")
 
+    def __upload_photo(self, path: str, peer_id: int, max_retries: int = 5):
+        return self._retry_method(self.upload.photo_messages, path, peer_id, max_retries=max_retries)[0]
+    
+    def __upload_document(self, path: str, title: str = None, tags = None, peer_id: int = None, max_retries: int = 5):
+        return self._retry_method(self.upload.document_message, path, title, tags, peer_id, max_retries=max_retries)["doc"]
+
     def __send(self, peer_id: int | list[int], text: str | None = None, *,
                media: Document | Media | None = None,
                keyboard: Keyboard | RemoveKeyboard | None = None,
@@ -126,12 +135,10 @@ class VkMessenger(Messenger):
                 media_peer_id = peer_id[0] if isinstance(peer_id, list) else peer_id
                 if media.is_img:
                     attachment_type = "photo"
-                    # uploaded = self.upload.photo(path, -64, group_id=VK_GROUP_ID)[0]
-                    uploaded = self.upload.photo_messages(path, media_peer_id)[0]
+                    uploaded = self.__upload_photo(path, media_peer_id)
                 else:
                     attachment_type = "doc"
-                    # uploaded = self.upload.document(path, title=media.filename, group_id=VK_GROUP_ID)["doc"]
-                    uploaded = self.upload.document_message(path, title=media.filename, peer_id=media_peer_id)["doc"]
+                    uploaded = self.__upload_document(path, title=media.filename, peer_id=media_peer_id)
             finally:
                 if temporary:
                     os.unlink(temporary)
@@ -192,12 +199,13 @@ class VkMessenger(Messenger):
         keyboard_json = vk_keyboard(keyboard)
         if keyboard_json is not None:
             params["keyboard"] = keyboard_json
-        self.api.messages.edit(**params)
+        self._retry_method(self.api.messages.edit, **params)
         self.__texts[(ref.peer_id, ref.message_id)] = text
 
     def edit_keyboard(self, ref, keyboard) -> None:
         # TODO: VK не умеет менять только клавиатуру; хранить текст надёжнее
-        self.api.messages.edit(
+        self._retry_method(
+            self.api.messages.edit,
             peer_id=ref.peer_id,
             message_id=ref.message_id,
             message=html_to_vk(self.__texts.get((ref.peer_id, ref.message_id), "")),
@@ -207,7 +215,8 @@ class VkMessenger(Messenger):
     def delete(self, ref) -> None:
         try:
             # VK requires cmids together with peer_id for conversation messages.
-            self.api.messages.delete(
+            self._retry_method(
+                self.api.messages.delete, 
                 peer_id=ref.peer_id, cmids=[ref.message_id], delete_for_all=1
             )
         except Exception as error:
@@ -220,7 +229,8 @@ class VkMessenger(Messenger):
         if user_id is None or peer_id is None:
             # TODO: пробрасывать user_id/peer_id всегда
             raise ValueError("Для ответа на callback в VK нужны user_id и peer_id")
-        self.api.messages.sendMessageEventAnswer(
+        self._retry_method(
+            self.api.messages.sendMessageEventAnswer,
             event_id=callback_id,
             user_id=user_id,
             peer_id=peer_id,
