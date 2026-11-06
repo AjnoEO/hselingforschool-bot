@@ -289,7 +289,12 @@ def send_authentication_confirmation(member: OlympMember, *, already_authenticat
                      "и в <a href=\"t.me/hselingforschool\">нашем Телеграм-канале</a>\n"
                      "Когда олимпиада начнётся, бот пришлёт тебе задания и ты сможешь записываться на сдачу задач через него")
     else:
-        response += "\n❗️ Олимпиада уже началась!"
+        response += (
+            f"\n\nЕсли у тебя возникли вопросы, обращайся к "
+            f"{' или '.join(ASK_PEOPLE_HANDLES.get(member.platform, []))} (организационные вопросы) "
+            f"или к {OWNER_HANDLES[member.platform]} (функционирование бота)"
+            f"\n\n❗️ Олимпиада уже началась!"
+        )
     notifier.notify(member, response)
     if current_olymp.status == OlympStatus.CONTEST and isinstance(member, Participant) and not member.finished:
         send_all_problem_blocks(member)
