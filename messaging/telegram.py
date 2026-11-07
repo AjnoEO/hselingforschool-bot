@@ -9,6 +9,7 @@ from telebot.types import (
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
 )
+from telebot.util import MAX_MESSAGE_LENGTH
 from .base import Messenger
 from .types import Document, Keyboard, Media, MessageRef, RemoveKeyboard
 from enums import Platform
@@ -51,6 +52,38 @@ class TelegramMessenger(Messenger):
             return InputFile(media.path, media.filename)
         return InputFile(media.data, media.filename)
 
+    @staticmethod
+    def __split_msg(text: str) -> list[str]:
+        paragraphs = text.split("\n\n")
+        split_msg = [[]]
+        last_total_len = 0
+        for p in paragraphs:
+            if last_total_len + 2 + len(p) <= MAX_MESSAGE_LENGTH:
+                split_msg[-1].append("")
+                split_msg[-1].append(p)
+                last_total_len += 2 + len(p)
+                continue
+            if split_msg[-1]:
+                split_msg.append([])
+                last_total_len = 0
+            if len(p) <= MAX_MESSAGE_LENGTH:
+                split_msg[-1].append(p)
+                last_total_len = len(p)
+                continue
+            for q in p.split("\n"):
+                if last_total_len + 1 + len(q) > MAX_MESSAGE_LENGTH:
+                    split_msg.append([])
+                    last_total_len = 0
+                if len(q) > MAX_MESSAGE_LENGTH:
+                    raise ValueError(f"Слишком длинный абзац: {q[:-(MAX_MESSAGE_LENGTH+100)]}…")
+                split_msg[-1].append(q)
+                last_total_len += (1 if last_total_len else 0) + len(q)
+            split_msg.append([])
+        if not split_msg[-1]: split_msg.pop()
+        split_msg = ["\n".join(paragraphs) for paragraphs in split_msg]
+        return split_msg
+
+
     def send( # TODO: Дробить длинные сообщения
         self,
         peer_id: int,
@@ -61,6 +94,10 @@ class TelegramMessenger(Messenger):
         reply_to: MessageRef | None = None,
         show_caption_above_media: bool = False
     ) -> MessageRef:
+        if len(text) > MAX_MESSAGE_LENGTH:
+            text, *remainder = self.__split_msg(text)
+        else:
+            remainder = None
         is_img = (
             isinstance(media, Document) and media.mime_type == "photo"
             or isinstance(media, Media) and media.is_img
@@ -92,6 +129,9 @@ class TelegramMessenger(Messenger):
                 reply_markup=self.__markup(keyboard),
                 reply_to_message_id=reply_to.message_id if reply_to else None,
             )
+        if remainder:
+            for follow_up_text in remainder:
+                self.send(peer_id, follow_up_text)
         return self.ref_for(message)
     
     def send_many(
