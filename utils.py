@@ -31,7 +31,8 @@ def decline(numeral: int, stem: str, endings: tuple[str, str, str]):
 
 class MultiError(Exception):
     def __init__(self, error_list: list[Exception], *args):
-        super().__init__(f"{len(error_list)} {decline(len(error_list), 'ошиб', ('ка', 'ки', 'ок'))}", *args)
+        error_msg = " ".join([f"{len(error_list)} {decline(len(error_list), 'ошиб', ('ка', 'ки', 'ок'))}"] + list(args))
+        super().__init__(error_msg)
         self.error_list = error_list
 
     def __bool__(self):

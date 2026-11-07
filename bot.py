@@ -408,17 +408,35 @@ def olymp_reg_start(ctx: Context):
     if current_olymp.status != OlympStatus.TBA:
         raise UserError("Олимпиада уже идёт или завершилась")
     current_olymp.status = OlympStatus.REGISTRATION
+    error_list: list[Exception] = []
     participants = current_olymp.get_participants()
     examiners = current_olymp.get_examiners()
     def p_message(p: Participant):
         return (f"Мы запустили авторизацию в боте для онлайн-участников. Тебя авторизовали автоматически!\n"
                 f"{p.display_data()}")
-    notifier.notify_many(participants, p_message)
+    try:
+        notifier.notify_many(participants, p_message)
+    except MultiError as exc:
+        error_list.extend(exc.error_list)
     def e_message(e: Examiner):
         return (f"Мы запустили авторизацию в боте. Тебя автоматически авторизовали как принимающего!\n"
                 f"{e.display_data()}")
-    notifier.notify_many(examiners, e_message)
-    ctx.reply(f"Регистрация на олимпиаду <em>{current_olymp.name}</em> запущена")
+    try:
+        notifier.notify_many(examiners, e_message)
+    except MultiError as exc:
+        error_list.extend(exc.error_list)
+    owner_message = f"Регистрация на олимпиаду <em>{current_olymp.name}</em> запущена"
+    if error_list:
+        owner_message += (
+            f"\n⚠️ Не удалось доставить сообщение "
+            f"{len(error_list)} {decline(len(error_list), 'пользовател', ('ю', 'ям', 'ям'))}"
+        )
+    ctx.reply(owner_message)
+    send_error = MultiError(error_list, "при рассылке сообщений")
+    if len(send_error) * 3 > len(examiners) + len(participants):
+        send_error.clean_raise()
+    elif send_error:
+        raise UserError(*send_error.args, ignore=True) from error_list[0]
 
 
 def start_olymp():
@@ -460,7 +478,8 @@ def start_olymp():
             show_caption_above_media=True
         )
     except MultiError as exc:
-        error_list.extend(exc.error_list)
+        if len(exc) > len(error_list):
+            error_list = exc.error_list
     examiners = current_olymp.get_examiners()
     for e in examiners:
         if e.external_id:

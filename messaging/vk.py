@@ -10,7 +10,7 @@ import requests
 from vk_api import VkApi
 from vk_api.keyboard import VkKeyboard
 from vk_api.upload import VkUpload
-from vk_api.exceptions import VkApiError
+from vk_api.exceptions import VkApiError, ApiError
 
 from enums import Platform
 from data import VK_GROUP_ID
@@ -90,7 +90,7 @@ def vk_keyboard(keyboard: Keyboard | RemoveKeyboard | None) -> str | None:
 
 class VkMessenger(Messenger):
     platform = Platform.VK
-    api_exceptions = (VkApiError, requests.exceptions.JSONDecodeError) # TODO: Предложить правку в либе vk_api?
+    api_exceptions = (ApiError, requests.exceptions.JSONDecodeError) # TODO: Предложить правку в либе vk_api?
 
     def __init__(self, vk: VkApi):
         self.vk = vk
@@ -118,11 +118,21 @@ class VkMessenger(Messenger):
     def __upload_document(self, path: str, title: str = None, tags = None, peer_id: int = None, max_retries: int = 5):
         return self._retry_method(self.upload.document_message, path, title, tags, peer_id, max_retries=max_retries)["doc"]
 
+    def __available_users(self, peer_ids: list[int]):
+        chat_infos = self._retry_method(
+            self.api.messages.getConversationsById,
+            peer_ids=peer_ids
+        )["items"]
+        print(">>>", chat_infos)
+        available_peers = [chat["peer"]["id"] for chat in chat_infos if chat["can_write"].get("allowed")]
+        return available_peers
+
     def __send(self, peer_id: int | list[int], text: str | None = None, *,
                media: Document | Media | None = None,
                keyboard: Keyboard | RemoveKeyboard | None = None,
                reply_to: MessageRef | None = None,
                forward_message: MessageRef | None = None) -> MessageRef:
+        available_peer_ids = None
         params = {
             "peer_ids" if isinstance(peer_id, list) else "peer_id": peer_id,
             "random_id": secrets.randbelow(2 ** 31),
@@ -132,13 +142,22 @@ class VkMessenger(Messenger):
         if media:
             path, temporary = self.__path(media)
             try:
-                media_peer_id = peer_id[0] if isinstance(peer_id, list) else peer_id
+                if isinstance(peer_id, list):
+                    available_peer_ids = self.__available_users(peer_id)
+                    params["peer_ids"] = available_peer_ids
+                    if not available_peer_ids:
+                        raise ValueError(f"Среди VK ID {peer_id} нет доступных пользователей")
+                    media_peer_id = available_peer_ids[0]
+                else:
+                    media_peer_id = peer_id
                 if media.is_img:
                     attachment_type = "photo"
                     uploaded = self.__upload_photo(path, media_peer_id)
                 else:
                     attachment_type = "doc"
                     uploaded = self.__upload_document(path, title=media.filename, peer_id=media_peer_id)
+            except ValueError as exc:
+                raise MultiError([exc], "при рассылке сообщений")
             finally:
                 if temporary:
                     os.unlink(temporary)
@@ -153,7 +172,14 @@ class VkMessenger(Messenger):
         if forward_message is not None:
             params["forward_messages"]=forward_message.message_id
         # TODO: обрабатывать ошибки VK, лимиты длины (MAX_MESSAGE_LENGTH) и повторы
-        api_response = self.api.messages.send(**params)
+        try:
+            api_response = self.api.messages.send(**params)
+        except ApiError as exc:
+            if exc.code != 901 or not isinstance(peer_id, list) or available_peer_ids is not None:
+                raise
+            peer_id = self.__available_users(peer_id)
+            if not peer_id:
+                raise MultiError([exc], "при рассылке сообщений")
         if isinstance(peer_id, list):
             error_list: list[VkApiError] = []
             for message_obj in api_response:
