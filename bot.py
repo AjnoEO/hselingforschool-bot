@@ -465,11 +465,15 @@ def start_olymp():
     try:
         notifier.notify_many(junior_participants, participant_start_message, media=junior_file)
     except MultiError as exc:
+        print(">>>", exc)
         error_list.extend(exc.error_list)
+        print("  >", error_list)
     try:
         notifier.notify_many(senior_participants, participant_start_message, media=senior_file)
     except MultiError as exc:
+        print(">>>", exc)
         error_list.extend(exc.error_list)
+        print("  >", error_list)
     try:
         notifier.notify_many(
             participants, BUTTON_HELP,
@@ -478,8 +482,10 @@ def start_olymp():
             show_caption_above_media=True
         )
     except MultiError as exc:
+        print(">>>", exc)
         if len(exc) > len(error_list):
             error_list = exc.error_list
+        print("  >", error_list)
     examiners = current_olymp.get_examiners()
     for e in examiners:
         if e.external_id:
@@ -491,7 +497,9 @@ def start_olymp():
             keyboard=REMOVE_KEYBOARD,
         )
     except MultiError as exc:
+        print(">>>", exc)
         error_list.extend(exc.error_list)
+        print("  >", error_list)
     owner_message = f"Олимпиада <em>{current_olymp.name}</em> начата"
     if error_list:
         owner_message += (
@@ -564,7 +572,7 @@ def olymp_start_confirmation_handler(ctx: Context):
     start_olymp()
 
 
-def finish_olymp():
+def finish_olymp(error_list: list[Exception] = []):
     if not current_olymp or current_olymp.status not in [OlympStatus.CONTEST, OlympStatus.QUEUE]:
         raise UserError("Олимпиады нет или она ещё не начата/уже завершена")
     participants_left = current_olymp.participants_amount(finished=False)
@@ -583,12 +591,17 @@ def finish_olymp():
             f"Олимпиада частично завершена, {decline(participants_left, 'продолжа', ('ет', 'ют', 'ют'))} "
             f"участие {participants_left} {decline(participants_left, 'участник', ('', 'а', 'ов'))}"
         )
-    send_error: MultiError = MultiError([])
     current_examiners = current_olymp.get_examiners()
     try:
         notifier.notify_many(current_examiners, e_message)
     except MultiError as exc:
-        send_error = exc
+        error_list.extend(exc)
+    send_error: MultiError = MultiError(error_list, "при рассылке сообщений")
+    if send_error:
+        owner_message += (
+            f"\n⚠️ Не удалось доставить сообщение "
+            f"{len(error_list)} {decline(len(error_list), 'пользовател', ('ю', 'ям', 'ям'))}"
+        )
     notifier.send(OWNER_PLATFORM, OWNER_ID, owner_message)
     if len(send_error) * 3 > len(current_examiners):
         send_error.clean_raise()
@@ -631,7 +644,7 @@ def olymp_finish(ctx: Context):
     except MultiError as exc:
         error_list.extend(exc.error_list)
     if not current_olymp.unhandled_queue_left(finished=True):
-        return finish_olymp()
+        return finish_olymp(error_list)
     participants_left = current_olymp.participants_amount(finished=False)
     if participants_left == 0:
         current_olymp.status = OlympStatus.QUEUE
@@ -2063,7 +2076,7 @@ def send_command(ctx: Context):
     if not member.external_id:
         raise UserError(f"{member} не авторизован(-а). Невозможно переслать сообщение…")
     message_to_send_ref = message_to_send
-    ctx.copy_to(member, message_to_send_ref)
+    ctx.copy_to(member, message_to_send_ref) # TODO: Обрабатывать ошибки
     ctx.send(
         ctx.peer_id,
         f"{member_class_name} {member} получил оповещение!",

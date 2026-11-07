@@ -118,14 +118,25 @@ class VkMessenger(Messenger):
     def __upload_document(self, path: str, title: str = None, tags = None, peer_id: int = None, max_retries: int = 5):
         return self._retry_method(self.upload.document_message, path, title, tags, peer_id, max_retries=max_retries)["doc"]
 
-    def __available_users(self, peer_ids: list[int]):
+    def __available_users(self, peer_ids: list[int]) -> tuple[list[int], list[Exception]]:
         chat_infos = self._retry_method(
             self.api.messages.getConversationsById,
             peer_ids=peer_ids
         )["items"]
         print(">>>", chat_infos)
-        available_peers = [chat["peer"]["id"] for chat in chat_infos if chat["can_write"].get("allowed")]
-        return available_peers
+        available_peers = []
+        errors = []
+        for chat in chat_infos:
+            try:
+                if chat["can_write"].get("allowed"):
+                    available_peers.append(chat["peer"]["id"])
+                    continue
+                raise VkApiError(chat["can_write"].get("reason"))
+            except VkApiError as exc:
+                errors.append(exc)
+        print("  >", available_peers)
+        print("  >", errors)
+        return available_peers, errors
 
     def __send(self, peer_id: int | list[int], text: str | None = None, *,
                media: Document | Media | None = None,
@@ -133,6 +144,7 @@ class VkMessenger(Messenger):
                reply_to: MessageRef | None = None,
                forward_message: MessageRef | None = None) -> MessageRef:
         available_peer_ids = None
+        error_list = []
         params = {
             "peer_ids" if isinstance(peer_id, list) else "peer_id": peer_id,
             "random_id": secrets.randbelow(2 ** 31),
@@ -143,10 +155,12 @@ class VkMessenger(Messenger):
             path, temporary = self.__path(media)
             try:
                 if isinstance(peer_id, list):
-                    available_peer_ids = self.__available_users(peer_id)
+                    available_peer_ids, errors = self.__available_users(peer_id)
                     params["peer_ids"] = available_peer_ids
                     if not available_peer_ids:
-                        raise ValueError(f"Среди VK ID {peer_id} нет доступных пользователей")
+                        MultiError(errors, "при рассылке сообщений").clean_raise()
+                    else:
+                        error_list.extend(errors)
                     media_peer_id = available_peer_ids[0]
                 else:
                     media_peer_id = peer_id
@@ -156,8 +170,6 @@ class VkMessenger(Messenger):
                 else:
                     attachment_type = "doc"
                     uploaded = self.__upload_document(path, title=media.filename, peer_id=media_peer_id)
-            except ValueError as exc:
-                raise MultiError([exc], "при рассылке сообщений")
             finally:
                 if temporary:
                     os.unlink(temporary)
@@ -177,11 +189,12 @@ class VkMessenger(Messenger):
         except ApiError as exc:
             if exc.code != 901 or not isinstance(peer_id, list) or available_peer_ids is not None:
                 raise
-            peer_id = self.__available_users(peer_id)
-            if not peer_id:
-                raise MultiError([exc], "при рассылке сообщений")
+            available_peer_ids, errors = self.__available_users(peer_id)
+            if not available_peer_ids:
+                MultiError(errors, "при рассылке сообщений").clean_raise()
+            else:
+                error_list.extend(errors)
         if isinstance(peer_id, list):
-            error_list: list[VkApiError] = []
             for message_obj in api_response:
                 if "error" in message_obj:
                     error_list.append(VkApiError(message_obj["error"]))
