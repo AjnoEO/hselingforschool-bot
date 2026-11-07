@@ -274,6 +274,8 @@ class User:
     @handle.setter
     def handle(self, value: str):
         value = self.conform_handle(value)
+        if "@" in value or " " in value:
+            raise ValueError(f"Невалидный хэндл: '{value}'")
         self.__set('handle', value)
         self.__handle = value
     @property

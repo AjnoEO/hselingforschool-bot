@@ -118,16 +118,19 @@ def handle_event(event):
                 print(f"! Не удалось ответить на callback: {error}")
 
 # TODO: Унести всё это добро в другой файл?
-def parse_identity_arg(arg: str) -> tuple[Platform, str]:
+def parse_identity_arg(arg: str, allow_no_platform: bool = False) -> tuple[Platform, str]:
     arg = arg.strip()
     no_messenger_error = UserError(f"Требуется указать мессенджер ({', '.join([p.code for p in Platform])})")
     if not "@" in arg:
-        raise no_messenger_error
-    prefix, handle = arg.split("@", 1)
-    if not prefix:
+        if not allow_no_platform:
+            raise no_messenger_error
+        prefix, handle = None, arg
+    else:
+        prefix, handle = arg.split("@", 1)
+    if not prefix and not allow_no_platform:
         raise no_messenger_error
     try:
-        platform = Platform.from_code(prefix)
+        platform = None if not prefix else Platform.from_code(prefix)
     except KeyError:
         raise UserError(f"Неизвестный мессенджер: {prefix}")
     handle = User.conform_handle(handle)
@@ -844,7 +847,12 @@ def edit_member(
     if not current_olymp:
         raise UserError("Нет текущей олимпиады")
     possible_keys = ['handle', 'name', 'surname'] + list(other_args.keys())
-    def handle_setter(member: OlympMember, value: str): member.handle = value
+    def handle_setter(member: OlympMember, value: str):
+        platform, handle = parse_identity_arg(value, allow_no_platform=True)
+        if platform and member.platform != platform:
+            member.platform = platform
+            member.external_id = None
+        member.handle = handle
     other_args['handle'] = (
         'Хэндл',
         lambda member: member.display_handle(hide_id=True),
@@ -865,7 +873,8 @@ def edit_member(
     member: OlympMember = resolve_member(identity, member_class, current_olymp.id)
     old_value = other_args[key][1](member)
     other_args[key][2](member, value)
-    change = f"{other_args[key][0]}: {old_value} → {value}"
+    new_value = other_args[key][1](member)
+    change = f"{other_args[key][0]}: {old_value} → {new_value}"
     ctx.reply(f"Данные участника {member} обновлены:\n" + change)
     if member.external_id:
         notifier.notify(
