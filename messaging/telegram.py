@@ -94,7 +94,7 @@ class TelegramMessenger(Messenger):
         reply_to: MessageRef | None = None,
         show_caption_above_media: bool = False
     ) -> MessageRef:
-        if len(text) > MAX_MESSAGE_LENGTH:
+        if text and len(text) > MAX_MESSAGE_LENGTH:
             text, *remainder = self.__split_msg(text)
         else:
             remainder = None
