@@ -2119,7 +2119,7 @@ def results_command(ctx: Context):
     junior_table = pd.DataFrame(columns=COLUMNS.keys())
     senior_table = pd.DataFrame(columns=COLUMNS.keys())
     for participant in current_olymp.get_participants():
-        sum, problem_results = participant.results()
+        sum, problem_results = participant.results(only_available=False)
         row = [None, f'{participant.surname} {participant.name}', participant.grade]
         for _, successful, number in problem_results:
             row.append(number if successful else 0)

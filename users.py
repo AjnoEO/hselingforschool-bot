@@ -655,9 +655,9 @@ class Participant(OlympMember):
         self.last_block_number += 1
         return self.last_block
     
-    def problems(self):
+    def problems(self, only_available: bool = True):
         problem_list: list[Problem] = []
-        for problem_block_number in range(1, self.last_block_number + 1):
+        for problem_block_number in range(1, (self.last_block_number if only_available else 3) + 1):
             problem_block = self.problem_block_from_number(problem_block_number)
             problem_list += problem_block.problems
         return problem_list
@@ -705,13 +705,15 @@ class Participant(OlympMember):
             return 3
         return 3 - len(fetch)
 
-    def results(self) -> tuple[int, list[tuple[Problem, bool, int]]]:
+    def results(self, only_available: bool = True) -> tuple[int, list[tuple[Problem, bool, int]]]:
         """
         Подсчитывает все результаты. Возвращает (`sum`, [(`problem`, `is_succesful`, `attempts_left_or_points`)])
+
+        `only_available` — только задачи, выданные участники
         """
         sum = 0
         detailed_results: list[tuple[Problem, bool, int]] = []
-        for i, problem in enumerate(self.problems()):
+        for i, problem in enumerate(self.problems(only_available=only_available)):
             attempts_left_or_points = self.attempts_left(problem)
             if is_successful := self.solved(problem):
                 attempts_left_or_points = (2+(i//3)*2) + attempts_left_or_points
