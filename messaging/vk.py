@@ -268,15 +268,13 @@ class VkMessenger(Messenger):
         if user_id is None or peer_id is None:
             # TODO: пробрасывать user_id/peer_id всегда
             raise ValueError("Для ответа на callback в VK нужны user_id и peer_id")
+        params = {"event_data": {"type": "show_snackbar", "text": text}} if text else {}
         self._retry_method(
             self.api.messages.sendMessageEventAnswer,
             event_id=callback_id,
             user_id=user_id,
             peer_id=peer_id,
-            event_data=json.dumps(
-                {"type": "show_snackbar", "text": text or "Готово"},
-                ensure_ascii=False,
-            ),
+            **params
         )
 
     def copy_message(self, peer_id: int, ref: MessageRef) -> MessageRef:
