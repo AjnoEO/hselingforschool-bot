@@ -2,6 +2,7 @@ from sqlite3 import Cursor
 from pathlib import Path
 import html
 import os
+import re
 import secrets
 from functools import wraps
 from db import db_connection
@@ -70,7 +71,7 @@ def get_n_args(text: str, min: int, max: int, no_arg_error: str):
     command_arg = text.split(maxsplit=max)[1:]
     if len(command_arg) < min:
         raise UserError(no_arg_error)
-    return tuple(command_arg)
+    return tuple(re.sub(r"\\\\", r"\\", re.sub(r"(?<!\\)\\s", r" ", arg)) for arg in command_arg)
 
 
 def get_tags_args(text: str, no_arg_error: str | None = None):
