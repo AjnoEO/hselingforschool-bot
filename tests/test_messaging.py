@@ -63,8 +63,8 @@ class FakeBot:
     def answer_callback_query(self, callback_id, **kwargs):
         self.calls.append(("answer_callback_query", callback_id, kwargs))
 
-    def copy_message(self, chat_id, from_chat_id, message_id):
-        self.calls.append(("copy_message", chat_id, from_chat_id, message_id))
+    def copy_message(self, chat_id, from_chat_id, message_id, **kwargs):
+        self.calls.append(("copy_message", chat_id, from_chat_id, message_id, kwargs))
         return SimpleNamespace(message_id=555)
 
 
@@ -144,8 +144,23 @@ class TelegramMessengerTest(unittest.TestCase):
         self.assertEqual(self.bot.calls[-1][2]["text"], "Ок")
 
         copied = self.messenger.copy_message(30, ref)
-        self.assertEqual(self.bot.calls[-1], ("copy_message", 30, 10, 20))
+        self.assertEqual(self.bot.calls[-1][:4], ("copy_message", 30, 10, 20))
         self.assertEqual(copied.message_id, 555)
+
+    def test_send_many_keeps_keyboard_for_copies(self):
+        keyboard = Keyboard()
+        keyboard.row(Button("Сдать"), Button("Мои задачи"))
+        self.messenger.send_many([10, 20, 30], "Текст", keyboard=keyboard)
+
+        self.assertEqual(
+            [call[0] for call in self.bot.calls],
+            ["send_message", "copy_message", "copy_message"],
+        )
+        self.assertIsInstance(self.bot.calls[0][3]["reply_markup"], ReplyKeyboardMarkup)
+        for call in self.bot.calls[1:]:
+            markup = call[4]["reply_markup"]
+            self.assertIsInstance(markup, ReplyKeyboardMarkup)
+            self.assertEqual(markup.keyboard[0][0]["text"], "Сдать")
 
 
 class ContextTest(unittest.TestCase):

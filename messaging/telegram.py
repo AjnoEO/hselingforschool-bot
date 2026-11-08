@@ -148,7 +148,7 @@ class TelegramMessenger(Messenger):
         for peer_id in peer_ids:
             try:
                 if ref_to_copy is not None:
-                    ref_to_copy = self.copy_message(peer_id, ref_to_copy)
+                    ref_to_copy = self.copy_message(peer_id, ref_to_copy, keyboard=keyboard)
                 else:
                     ref_to_copy = self.send(
                         peer_id, text, media=media, keyboard=keyboard, 
@@ -189,7 +189,13 @@ class TelegramMessenger(Messenger):
                         *, user_id: int | None = None, peer_id: int | None = None) -> None:
         self._retry_method(self.bot.answer_callback_query, callback_id, text=text, show_alert=show_alert)
 
-    def copy_message(self, peer_id: int, ref: MessageRef) -> MessageRef:
+    def copy_message(
+        self,
+        peer_id: int,
+        ref: MessageRef,
+        *,
+        keyboard: Keyboard | RemoveKeyboard | None = None,
+    ) -> MessageRef:
         if self.platform != ref.platform and ref.text is None and ref.media is None:
             raise ValueError(
                 f"Данные о содержании сообщения {ref} недоступны. "
@@ -197,8 +203,13 @@ class TelegramMessenger(Messenger):
         if self.platform != ref.platform and isinstance(ref.media, Document):
             raise NotImplementedError(f"Пересылка документов из {ref.platform} в {self.platform} пока невозможна")
         elif self.platform != ref.platform:
-            return self.send(peer_id, ref.text, media=ref.media)
-        message = self._retry_method(self.bot.copy_message, peer_id, ref.peer_id, ref.message_id)
+            return self.send(peer_id, ref.text, media=ref.media, keyboard=keyboard)
+        # copyMessage не переносит reply_markup исходного сообщения,
+        # поэтому клавиатуру нужно передать явно.
+        message = self._retry_method(
+            self.bot.copy_message, peer_id, ref.peer_id, ref.message_id,
+            reply_markup=self.__markup(keyboard),
+        )
         return MessageRef(peer_id, message.message_id, self.platform)
 
     def copy_many(self, peer_ids: list[int], ref: MessageRef) -> None:
