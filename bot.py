@@ -2002,7 +2002,7 @@ def give_out_problem_block(ctx: Context):
         participant_reply += (f"\nЧтобы записаться на сдачу задачи, используй команду <code>"
                                 + escape_html("/queue <номер задачи>")
                                 + "</code>")
-    filename = f"Блок_{new_problem_block_number}"
+    filename = f"Блок_{new_problem_block_number}.pdf"
     junior_first_block = ProblemBlock.from_block_type(current_olymp.id, BlockType[f"JUNIOR_{new_problem_block_number}"])
     junior_file = FileMedia(junior_first_block.path or ProblemBlock.DEFAULT_PATH, filename=filename)
     senior_first_block = ProblemBlock.from_block_type(current_olymp.id, BlockType[f"SENIOR_{new_problem_block_number}"])
